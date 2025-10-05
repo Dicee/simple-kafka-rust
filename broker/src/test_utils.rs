@@ -3,6 +3,7 @@ use uuid::Uuid;
 use std::fs;
 use std::fs::read_to_string;
 
+/// Simplifies the creation, management and state assertions for temporary files specifically used in tests.
 pub struct TempTestFile {
     path: String,
 }
