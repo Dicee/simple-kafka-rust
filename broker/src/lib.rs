@@ -1,3 +1,5 @@
 pub(crate) mod append_only_log;
-pub(crate) mod test_utils;
 mod client;
+
+#[cfg(test)]
+pub(crate) mod test_utils;

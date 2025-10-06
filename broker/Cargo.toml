@@ -10,3 +10,7 @@ edition = "2024"
 version = "1.18.1"
 # Lets you generate random UUIDs
 features = ["v4"]
+
+[dev-dependencies]
+assertor = "0.0.4"
+walkdir = "2.5.0"

@@ -52,3 +52,72 @@ impl Drop for AppendOnlyLog {
         let _ = self.flush(); // ignore errors during drop
     }
 }
+
+/// This [LogFile] implementation abstracts the rotation of [AppendOnlyLog] files based on a maximum byte size.
+/// For simplicity, we will store all the files for a single rotating log in the same directory, neglecting the impact
+/// it may have on listing speed. In our end-to-end tests, we'll never reach a large scale where this will start becoming
+/// significant. Otherwise, we'd need to design a more efficient layout.
+/// Additionally, and for the same motivation of keeping the solution simple and suitable for modest scale, we will support
+/// a single file naming scheme, allowing at most 10^5 files per [RotatingAppendOnlyLog].
+pub struct RotatingAppendOnlyLog {
+    root_path: String,
+    base_file_name: String,
+    log_index: u32,
+    max_byte_size: u64,
+    current_byte_size: u64,
+    log: AppendOnlyLog,
+}
+
+// Note that we won't implement drop manually because the default implementation should be correct, since AppendOnlyLog itself implements Drop
+// to make sure any buffered data is flushed to disk before closing resources
+impl RotatingAppendOnlyLog {
+    pub fn open(root_path: String, base_file_name: String, log_index: u32, max_byte_size: u64) -> io::Result<Self> {
+        let full_path = Self::get_log_name(&root_path, &base_file_name, log_index);
+        let mut len = 0u64;
+
+        if fs::exists(&full_path)? {
+            len = fs::metadata(&full_path)?.len();
+        }
+
+        Ok(RotatingAppendOnlyLog {
+            root_path,
+            base_file_name,
+            log_index,
+            max_byte_size,
+            current_byte_size: len,
+            log: AppendOnlyLog::open(&full_path)?
+        })
+    }
+
+    fn get_next_log_name(&self) -> String {
+        Self::get_log_name(&self.root_path, &self.base_file_name, self.log_index + 1)
+    }
+
+    fn get_log_name(root_path: &String, base_file_name: &String, log_index: u32) -> String {
+        format!("{root_path}/{base_file_name}.{log_index:05}")
+    }
+}
+
+impl LogFile for RotatingAppendOnlyLog {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        // note that while converting usize to u64 is always safe, the reverse is not true
+        if buf.len() as u64 + self.current_byte_size >= self.max_byte_size {
+            self.flush()?;
+            let full_path = self.get_next_log_name();
+            assert!(!fs::exists(&full_path)?, "Next rotated file should not already exist, but did. Path: {full_path}");
+
+            self.log = AppendOnlyLog::open(&full_path)?;
+            self.current_byte_size = 0;
+            self.log_index += 1;
+        }
+
+        // order matters as we only update the size if the write was successful to prevent an inconsistent state
+        let result = self.log.write(buf)?;
+        self.current_byte_size += buf.len() as u64;
+        Ok(result)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.log.flush()
+    }
+}

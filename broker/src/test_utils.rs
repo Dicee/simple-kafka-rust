@@ -2,11 +2,45 @@ use std::env;
 use std::fs;
 use std::fs::read_to_string;
 use uuid::Uuid;
+use assertor::{assert_that, VecAssertion};
+use walkdir::WalkDir;
+
+/// Simplifies the creation, management and state assertions for temporary directories specifically used in tests.
+pub struct TempTestDir {
+    path: String,
+}
 
 /// Simplifies the creation, management and state assertions for temporary files specifically used in tests.
 pub struct TempTestFile {
-    test_dir: String,
+    test_dir: TempTestDir,
     path: String,
+}
+
+impl TempTestDir {
+    pub fn create() -> TempTestDir {
+        let unit_tests_dir = get_unit_tests_dir();
+        // allows clean isolation between tests, since by default Cargo runs them in parallel
+        let temp_dir = Uuid::new_v4().to_string();
+        let path = format!("{unit_tests_dir}/{temp_dir}");
+
+        fs::create_dir_all(&path).expect("Unable to create test directory");
+        TempTestDir { path }
+    }
+
+    pub fn assert_exactly_contains_files(&self, expected_files_in_order: &Vec<String>) {
+        let files: Vec<String> = WalkDir::new(&self.path)
+            .sort_by_file_name()
+            .into_iter()
+            .map(|e| e.unwrap())
+            .filter(|e| e.metadata().unwrap().is_file())
+            .map(|e| e.path().to_str().unwrap().to_string())
+            .map(|absolute_path| absolute_path.replace(&ensure_trailing_slash(&self.path), ""))
+            .collect();
+
+        assert_that!(files).contains_exactly_in_order(expected_files_in_order);
+    }
+
+    pub fn path(&self) -> &str { self.path.as_str() }
 }
 
 impl TempTestFile {
@@ -19,16 +53,10 @@ impl TempTestFile {
     pub fn create() -> TempTestFile { Self::create_within("") }
     
     pub fn create_within(sub_dir: &str) -> TempTestFile {
-        let unit_tests_dir = get_unit_tests_dir();
-        // allows clean isolation between tests, since by default Cargo runs them in parallel
-        let temp_dir = Uuid::new_v4().to_string();
-        let test_dir = format!("{unit_tests_dir}/{temp_dir}");
-
-        fs::create_dir_all(&test_dir).expect("Unable to create test directory");
-
+        let test_dir = TempTestDir::create();
         let file_name = Uuid::new_v4().to_string();
         let sub_dir = ensure_trailing_slash(sub_dir);
-        let full_path = format!("{test_dir}/{sub_dir}{file_name}");
+        let full_path = format!("{}/{sub_dir}{file_name}", test_dir.path);
 
         TempTestFile {
             test_dir,
@@ -45,18 +73,24 @@ impl TempTestFile {
     }
 
     pub fn assert_has_content(&self, content: &str) {
-        assert_eq!(read_to_string(&self.path).unwrap(), content)
+        assert_file_has_content(&self.path, content);
     }
 
+    pub fn test_dir(&self) -> &TempTestDir { &self.test_dir }
+    
     pub fn path(&self) -> &str { self.path.as_str() }
 }
 
-impl Drop for TempTestFile {
+impl Drop for TempTestDir {
     fn drop(&mut self) {
-        if let Err(e) = fs::remove_dir_all(&self.test_dir) {
-            panic!("Failed to delete test directory: {}: {e:?}", self.test_dir);
+        if let Err(e) = fs::remove_dir_all(&self.path) {
+            panic!("Failed to delete test directory: {}: {e:?}", self.path);
         }
     }
+}
+
+pub fn assert_file_has_content(path: &str, content: &str) {
+    assert_eq!(read_to_string(path).expect(&format!("Failed to read content as string for path {path}")), content)
 }
 
 fn get_unit_tests_dir() -> String {
