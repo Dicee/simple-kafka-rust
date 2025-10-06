@@ -1,10 +1,11 @@
 use std::env;
-use uuid::Uuid;
 use std::fs;
 use std::fs::read_to_string;
+use uuid::Uuid;
 
 /// Simplifies the creation, management and state assertions for temporary files specifically used in tests.
 pub struct TempTestFile {
+    test_dir: String,
     path: String,
 }
 
@@ -15,14 +16,24 @@ impl TempTestFile {
         temp_file
     }
 
-    pub fn create() -> TempTestFile {
-        let temp_dir = env::temp_dir();
-        let temp_dir = temp_dir.to_str().expect("Temp directory not found");
+    pub fn create() -> TempTestFile { Self::create_within("") }
+    
+    pub fn create_within(sub_dir: &str) -> TempTestFile {
+        let unit_tests_dir = get_unit_tests_dir();
+        // allows clean isolation between tests, since by default Cargo runs them in parallel
+        let temp_dir = Uuid::new_v4().to_string();
+        let test_dir = format!("{unit_tests_dir}/{temp_dir}");
 
-        let unit_tests_dir = format!("{temp_dir}/rust_unit_tests");
-        fs::create_dir_all(&unit_tests_dir).expect("Unable to create test directory");
+        fs::create_dir_all(&test_dir).expect("Unable to create test directory");
 
-        TempTestFile { path: format!("{unit_tests_dir}/{}", Uuid::new_v4().to_string()) }
+        let file_name = Uuid::new_v4().to_string();
+        let sub_dir = ensure_trailing_slash(sub_dir);
+        let full_path = format!("{test_dir}/{sub_dir}{file_name}");
+
+        TempTestFile {
+            test_dir,
+            path: full_path
+        }
     }
 
     pub fn set_content(&mut self, content: &str) {
@@ -42,6 +53,21 @@ impl TempTestFile {
 
 impl Drop for TempTestFile {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        if let Err(e) = fs::remove_dir_all(&self.test_dir) {
+            panic!("Failed to delete test directory: {}: {e:?}", self.test_dir);
+        }
     }
+}
+
+fn get_unit_tests_dir() -> String {
+    let temp_dir = env::temp_dir();
+    let temp_dir = temp_dir.to_str().expect("Temp directory not found");
+    format!("{temp_dir}/rust_unit_tests")
+}
+
+fn ensure_trailing_slash(s: &str) -> String {
+    let mut s = s.to_string();
+    if s.is_empty() { return s; }
+    s.push_str("/");
+    s
 }

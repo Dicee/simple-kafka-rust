@@ -1,4 +1,6 @@
-use crate::append_only_log::AppendOnlyLog;
+use std::path::Path;
+
+use crate::append_only_log::{AppendOnlyLog, LogFile};
 use crate::test_utils::TempTestFile;
 
 #[test]
@@ -8,7 +10,24 @@ fn test_open_and_write_to_new_file() {
 
     let content = "Hello world!";
     log.write(content.as_bytes()).unwrap();
-    log.close().unwrap();
+    log.flush().unwrap();
+
+    temp_file.assert_has_content(content);
+}
+
+#[test]
+fn test_open_and_write_to_new_file_with_dirs_to_create() {
+    let temp_file = TempTestFile::create_within("does/not/exist");
+
+    let parent_dir = Path::new(temp_file.path()).parent().unwrap();
+    assert!(!parent_dir.exists(), "Parent directory {parent_dir:?} should not exist yet");
+
+    let mut log = AppendOnlyLog::open(temp_file.path()).unwrap();
+    assert!(parent_dir.exists(), "Parent directory {parent_dir:?} should now exist");
+
+    let content = "Hello world!";
+    log.write(content.as_bytes()).unwrap();
+    log.flush().unwrap();
 
     temp_file.assert_has_content(content);
 }
@@ -20,7 +39,7 @@ fn test_open_and_write_to_existing_file() {
 
     let content = "How are you doing mate?";
     log.write(content.as_bytes()).unwrap();
-    log.close().unwrap();
+    log.flush().unwrap();
 
     temp_file.assert_has_content("Hey bro\nHow are you doing mate?");
 }

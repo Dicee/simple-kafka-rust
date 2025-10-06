@@ -31,3 +31,6 @@ The below features seem too difficult to implement for the amount of time I woul
 - transactional writes
 - exactly-once semantic (requires transactional writes)
 - non-local hosting of the containers
+- adding or removing brokers, shrinking or growing the number of partitions
+  - we'll assume a static number of partitions distributed on a static number of brokers, with a static number of replicas
+  - and thus we won't bother with consistent hashing

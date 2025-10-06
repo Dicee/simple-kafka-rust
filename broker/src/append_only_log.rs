@@ -1,4 +1,6 @@
+use std::fs;
 use std::fs::{File, OpenOptions};
+use std::path::Path;
 use std::io;
 use std::io::{BufWriter, Write};
 
@@ -6,15 +8,26 @@ use std::io::{BufWriter, Write};
 #[path="append_only_log_test.rs"]
 mod append_only_log_test;
 
+pub trait LogFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize>;
+
+    fn flush(&mut self) -> io::Result<()>;
+}
+
 /// Simplistic implementation of an append-only log. It must be written to by a single thread at a time.
 pub struct AppendOnlyLog {
     writer: BufWriter<File>,
 }
 
 impl AppendOnlyLog {
-    /// Will create the file if it doesn't exist (without creating directories in the path), or open it
+    /// Will create the file if it doesn't exist (creating missing directories in the path if needed), or open it
     /// in append mode otherwise.
     pub fn open(path: &str) -> io::Result<Self> {
+        let path = Path::new(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -22,19 +35,15 @@ impl AppendOnlyLog {
 
         Ok(AppendOnlyLog { writer: BufWriter::new(file) })
     }
+}
 
-    pub fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+impl LogFile for AppendOnlyLog {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.writer.write(buf)
     }
 
-    pub fn flush(&mut self) -> io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
         self.writer.flush()
-    }
-
-    /// Flushes the writer and causes it to be dropped along with the [AppendOnlyLog] since this method takes ownership of self.
-    /// Calling this method will thus close all resources properly and will make the log instance unusable.
-    pub fn close(mut self) -> io::Result<()> {
-        self.flush()
     }
 }
 
