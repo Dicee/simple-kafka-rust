@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use crate::append_only_log::{AppendOnlyLog, LogFile, RotatingAppendOnlyLog};
+use super::{AppendOnlyLog, LogFile, RotatingAppendOnlyLog};
 use crate::test_utils::{assert_file_has_content, TempTestDir, TempTestFile};
 
 #[test]
