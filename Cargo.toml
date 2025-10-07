@@ -1,2 +1,2 @@
 [workspace]
-members = ["broker"]
+members = ["broker", "protocol"]

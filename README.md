@@ -25,6 +25,7 @@ Pet project to learn about Rust and implement some recently learned implementati
 
 ### Low priority
 - implement batching at the producer side and in the broker to improve on IO performance
+- implement filtering based on key-value headers on records
 
 ### Out-of-scope
 The below features seem too difficult to implement for the amount of time I would like to dedicate to this project, and go beyond my learning objectives:
@@ -34,3 +35,4 @@ The below features seem too difficult to implement for the amount of time I woul
 - adding or removing brokers, shrinking or growing the number of partitions
   - we'll assume a static number of partitions distributed on a static number of brokers, with a static number of replicas
   - and thus we won't bother with consistent hashing
+- custom retention and expiry. We won't delete any data.
