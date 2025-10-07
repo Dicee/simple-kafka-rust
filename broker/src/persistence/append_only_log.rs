@@ -3,6 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::io;
 use std::io::{BufWriter, Write};
+use walkdir::{DirEntry, Error, WalkDir};
 
 #[cfg(test)]
 #[path="append_only_log_test.rs"]
@@ -61,7 +62,7 @@ impl Drop for AppendOnlyLog {
 /// a single file naming scheme, allowing at most 10^5 files per [RotatingAppendOnlyLog].
 pub struct RotatingAppendOnlyLog {
     root_path: String,
-    base_file_name: String,
+    base_file_name: &'static str,
     log_index: u32,
     max_byte_size: u64,
     current_byte_size: u64,
@@ -71,8 +72,43 @@ pub struct RotatingAppendOnlyLog {
 // Note that we won't implement drop manually because the default implementation should be correct, since AppendOnlyLog itself implements Drop
 // to make sure any buffered data is flushed to disk before closing resources
 impl RotatingAppendOnlyLog {
-    pub fn open(root_path: String, base_file_name: String, log_index: u32, max_byte_size: u64) -> io::Result<Self> {
-        let full_path = Self::get_log_name(&root_path, &base_file_name, log_index);
+    /// Detects and open the latest rotated file for a given base file name and root path, or initializes a new one with index 0.
+    /// Files are expected directly under the root path, any sub-directory and its contents will be silently ignored. Files which name
+    /// does no starting with the specified base file name will also be skipped.
+    ///
+    /// ## Errors
+    /// This function will panic if a file starting with the base file name has an invalid format. The parsing is quite relaxed, we only require
+    /// that it contains at least one '.' character and that whatever comes after it is a valid u64. We could be more stringent on parsing since
+    /// we know the format is exactly `format!("{base_file_name}.{index:05}")`, but this will do for our little project.
+    pub fn open_latest(root_path: String, base_file_name: &'static str, max_byte_size: u64) -> io::Result<Self> {
+        if fs::exists(&root_path)? {
+            let mut files = WalkDir::new(&root_path)
+                .sort_by(|a, b| a.file_name().cmp(b.file_name()).reverse())
+                .into_iter();
+
+            while let Some(ref file) = files.next() {
+                let f = to_io_res(file)?;
+                let file_name = f.file_name().to_str().unwrap();
+
+                let is_file= to_io_res(&f.metadata())?.is_file();
+                let matches_prefix = file_name.starts_with(base_file_name);
+
+                if is_file && matches_prefix {
+                    return Self::open(root_path, base_file_name, Self::parse_index(file_name), max_byte_size);
+                }
+            }
+        }
+
+        Self::open(root_path, base_file_name, 0, max_byte_size)
+    }
+
+    fn parse_index(file_name: &str) -> u32 {
+        let dot_index = file_name.rfind('.').expect(&format!("Invalid file name {file_name}, it should have at least one . character"));
+        file_name[dot_index + 1..].parse::<u32>().expect(&format!("Invalid file name {file_name}, failed to parse the index number"))
+    }
+
+    fn open(root_path: String, base_file_name: &'static str, log_index: u32, max_byte_size: u64) -> io::Result<Self> {
+        let full_path = Self::get_log_name(&root_path, base_file_name, log_index);
         let mut len = 0u64;
 
         if fs::exists(&full_path)? {
@@ -93,7 +129,7 @@ impl RotatingAppendOnlyLog {
         Self::get_log_name(&self.root_path, &self.base_file_name, self.log_index + 1)
     }
 
-    fn get_log_name(root_path: &String, base_file_name: &String, log_index: u32) -> String {
+    fn get_log_name(root_path: &String, base_file_name: &str, log_index: u32) -> String {
         format!("{root_path}/{base_file_name}.{log_index:05}")
     }
 }
@@ -119,5 +155,12 @@ impl LogFile for RotatingAppendOnlyLog {
 
     fn flush(&mut self) -> io::Result<()> {
         self.log.flush()
+    }
+}
+
+fn to_io_res<T>(entry: &walkdir::Result<T>) -> io::Result<&T> {
+    match entry {
+        Ok(f) => Ok(f),
+        Err(e) => Err(io::Error::new(io::ErrorKind::Other, format!("{e:?}"))),
     }
 }
