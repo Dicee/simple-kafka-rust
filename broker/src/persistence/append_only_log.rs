@@ -1,9 +1,9 @@
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::path::Path;
 use std::io;
 use std::io::{BufWriter, Write};
-use walkdir::{DirEntry, Error, WalkDir};
+use std::path::Path;
+use walkdir::WalkDir;
 
 #[cfg(test)]
 #[path="append_only_log_test.rs"]

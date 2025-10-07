@@ -151,7 +151,7 @@ fn test_open_rotated_malformed_index_no_dot() {
 
 #[test]
 #[should_panic(expected = "Invalid file name data.00$03, failed to parse the index number")]
-fn test_open_rotated_malformed_index_NaN() {
+fn test_open_rotated_malformed_index_not_a_number() {
     let temp_dir = TempTestDir::create();
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
 
