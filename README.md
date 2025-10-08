@@ -36,3 +36,8 @@ The below features seem too difficult to implement for the amount of time I woul
   - we'll assume a static number of partitions distributed on a static number of brokers, with a static number of replicas
   - and thus we won't bother with consistent hashing
 - custom retention and expiry. We won't delete any data.
+- CRC (Cyclic Redundant Check). We will do everything locally so the chance of having corrupted data is low
+- service discovery, metadata and state storage. In order to store information about topics and partitions, the state of consumer and publisher offsets, or dynamic information
+  about consumer groups, we would normally need a whole service for this (e.g. ZooKeeper, maybe a DB, or a custom process running on brokers), but we'll simplify things and have 
+  a container act as this service. It will be allowed to store data in memory or on disk (e.g. via an SQLite database) without concerning itself with scalability, durability or
+  availability.

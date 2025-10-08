@@ -72,7 +72,7 @@ pub struct RotatingAppendOnlyLog {
 // Note that we won't implement drop manually because the default implementation should be correct, since AppendOnlyLog itself implements Drop
 // to make sure any buffered data is flushed to disk before closing resources
 impl RotatingAppendOnlyLog {
-    /// Detects and open the latest rotated file for a given base file name and root path, or initializes a new one with index 0.
+    /// Detects and opens the latest rotated file for a given base file name and root path, or initializes a new one with index 0.
     /// Files are expected directly under the root path, any sub-directory and its contents will be silently ignored. Files which name
     /// does no starting with the specified base file name will also be skipped.
     ///
