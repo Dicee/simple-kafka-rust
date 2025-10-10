@@ -1,0 +1,11 @@
+[package]
+name = "coordinator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rusqlite = {version = "0.37.0", features = ["bundled"]}
+
+[dev-dependencies]
+assertor.workspace = true
+file_test_utils = {path = "../file_test_utils"}
