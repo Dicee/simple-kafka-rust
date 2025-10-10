@@ -1,5 +1,5 @@
 use super::LogManager;
-use crate::test_utils::{assert_file_has_content, TempTestDir};
+use file_test_utils::{assert_file_has_content, TempTestDir};
 
 // We won't test rotation because this is an implementation detail of LogManager, and it's tested against RotatingAppendOnlyLog.
 // As long as LogManager uses it, its correctness in terms of rotation is guaranteed.

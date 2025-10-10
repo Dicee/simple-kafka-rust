@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 use super::{AppendOnlyLog, LogFile, RotatingAppendOnlyLog};
-use crate::test_utils::{assert_file_has_content, TempTestDir, TempTestFile};
+use file_test_utils::{assert_file_has_content, TempTestDir, TempTestFile};
 
 const BASE_FILE_NAME: &'static str = "data";
 const DEFAULT_MAX_BYTES: u64 = 30; // can fit two "Hello world!" but not more
@@ -12,7 +12,7 @@ fn test_open_and_write_to_new_file() {
     let mut log = AppendOnlyLog::open(temp_file.path()).unwrap();
 
     let content = "Hello world!";
-    log.write(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
     log.flush().unwrap();
 
     temp_file.assert_has_content(content);
@@ -29,7 +29,7 @@ fn test_open_and_write_to_new_file_with_dirs_to_create() {
     assert!(parent_dir.exists(), "Parent directory {parent_dir:?} should now exist");
 
     let content = "Hello world!";
-    log.write(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
     log.flush().unwrap();
 
     temp_file.assert_has_content(content);
@@ -41,7 +41,7 @@ fn test_open_and_write_to_existing_file() {
     let mut log = AppendOnlyLog::open(temp_file.path()).unwrap();
 
     let content = "How are you doing mate?";
-    log.write(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
     log.flush().unwrap();
 
     temp_file.assert_has_content("Hey bro\nHow are you doing mate?");
@@ -53,7 +53,7 @@ fn test_flush() {
     let mut log = AppendOnlyLog::open(temp_file.path()).unwrap();
 
     let content = "How are you doing mate?";
-    log.write(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
 
     temp_file.assert_has_content("");
 
@@ -68,7 +68,7 @@ fn test_drop() {
 
     {
         let mut log = AppendOnlyLog::open(temp_file.path()).unwrap();
-        log.write(content.as_bytes()).unwrap();
+        log.write_all(content.as_bytes()).unwrap();
         temp_file.assert_has_content("");
     }
 
@@ -87,7 +87,7 @@ fn test_open_new_rotated_log() {
 
     let mut log = new_rotated_log(root_path);
     let content = "Hello world!";
-    log.write(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
     log.flush().unwrap();
 
     assert_file_has_content(&format!("{}data.00000", log.root_path), content);
@@ -107,7 +107,7 @@ fn test_open_existing_rotated_log() {
     fs::create_dir(format!("{root_path}trash_dir")).unwrap();
 
     let mut log = new_rotated_log(root_path);
-    log.write("Hello world!".as_bytes()).unwrap();
+    log.write_all("Hello world!".as_bytes()).unwrap();
     log.flush().unwrap();
 
     assert_file_has_content(&format!("{}data.00003", log.root_path), "3");
@@ -128,7 +128,7 @@ fn test_open_rotated_log_already_at_max_bytes() {
     let mut log = new_rotated_log(root_path);
 
     let new_content = "Hello world!";
-    log.write(new_content.as_bytes()).unwrap();
+    log.write_all(new_content.as_bytes()).unwrap();
     log.flush().unwrap();
 
     assert_file_has_content(&existing_file_path, existing_content);
@@ -171,11 +171,11 @@ fn test_rotate() {
     let mut log = new_rotated_log(root_path);
 
     let content = "Hello world!";
-    log.write(content.as_bytes()).unwrap();
-    log.write(content.as_bytes()).unwrap();
-    log.write(content.as_bytes()).unwrap();
-    log.write(content.as_bytes()).unwrap();
-    log.write(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
 
     temp_dir.assert_exactly_contains_files(&vec![
         "my-topic/partition=12/data.00000".to_string(),
@@ -204,7 +204,7 @@ fn test_rotate_while_next_file_exists() {
     let mut log = RotatingAppendOnlyLog::open_latest(root_path, BASE_FILE_NAME, content.len() as u64 + 1).unwrap();
     write_to_file(&log.root_path, "data.00004", content);
 
-    log.write(&[55, 56]).unwrap(); // triggers a rotation, which should fail because the file with index 4 is already present
+    log.write_all(&[55, 56]).unwrap(); // triggers a rotation, which should fail because the file with index 4 is already present
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn test_drop_rotated_log() {
 
     {
         let mut log = new_rotated_log(root_path);
-        log.write(content.as_bytes()).unwrap();
+        log.write_all(content.as_bytes()).unwrap();
         assert_file_has_content(&expected_path, "");
     }
 

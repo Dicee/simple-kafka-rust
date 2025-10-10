@@ -1,2 +1,6 @@
 [workspace]
-members = ["broker", "protocol"]
+members = ["broker", "coordinator", "file_test_utils", "protocol"]
+
+[workspace.dependencies]
+assertor = "0.0.4"
+walkdir = "2.5.0"

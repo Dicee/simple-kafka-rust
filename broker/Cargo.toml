@@ -4,12 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-walkdir = "2.5.0"
-
-[dependencies.uuid]
-version = "1.18.1"
-# Lets you generate random UUIDs
-features = ["v4"]
+walkdir.workspace = true
+protocol = { path = "../protocol" }
 
 [dev-dependencies]
-assertor = "0.0.4"
+assertor.workspace = true
+file_test_utils = { path = "../file_test_utils" }

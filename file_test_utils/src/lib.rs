@@ -51,7 +51,7 @@ impl TempTestFile {
     }
 
     pub fn create() -> TempTestFile { Self::create_within("") }
-    
+
     pub fn create_within(sub_dir: &str) -> TempTestFile {
         let test_dir = TempTestDir::create();
         let file_name = Uuid::new_v4().to_string();
@@ -77,7 +77,7 @@ impl TempTestFile {
     }
 
     pub fn test_dir(&self) -> &TempTestDir { &self.test_dir }
-    
+
     pub fn path(&self) -> &str { self.path.as_str() }
 }
 

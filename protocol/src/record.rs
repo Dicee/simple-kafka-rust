@@ -65,8 +65,7 @@ fn serialize_record(record: &Record, offset_delta: u32, base_timestamp: u64) -> 
 
     serialize_option_string(&record.key, &mut payload_bytes);
     serialize_string(&record.value, &mut payload_bytes);
-    let vec = &record.headers;
-    payload_bytes.extend(encode_var_int(vec_len_as_u32(vec)));
+    payload_bytes.extend(encode_var_int(vec_len_as_u32(&record.headers)));
 
     for header in record.headers.iter() {
         serialize_header(&header, &mut payload_bytes);
@@ -88,9 +87,9 @@ fn serialize_option_string(s: &Option<String>, bytes: &mut Vec<u8>) {
 }
 
 fn serialize_string(value: &str, bytes: &mut Vec<u8>) {
-    let key_bytes = value.as_bytes();
-    bytes.extend(encode_var_int(u32::try_from(key_bytes.len()).unwrap()));
-    bytes.extend(key_bytes);
+    let value_bytes = value.as_bytes();
+    bytes.extend(encode_var_int(u32::try_from(value_bytes.len()).unwrap()));
+    bytes.extend(value_bytes);
 }
 
 fn snappy_compress(bytes: Vec<u8>) -> Vec<u8> {

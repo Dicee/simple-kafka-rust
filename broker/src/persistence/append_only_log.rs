@@ -10,7 +10,7 @@ use walkdir::WalkDir;
 mod append_only_log_test;
 
 pub trait LogFile {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize>;
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()>;
 
     fn flush(&mut self) -> io::Result<()>;
 }
@@ -39,8 +39,8 @@ impl AppendOnlyLog {
 }
 
 impl LogFile for AppendOnlyLog {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.writer.write(buf)
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.writer.write_all(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -135,7 +135,7 @@ impl RotatingAppendOnlyLog {
 }
 
 impl LogFile for RotatingAppendOnlyLog {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         // note that while converting usize to u64 is always safe, the reverse is not true
         if buf.len() as u64 + self.current_byte_size >= self.max_byte_size {
             self.flush()?;
@@ -148,7 +148,7 @@ impl LogFile for RotatingAppendOnlyLog {
         }
 
         // order matters as we only update the size if the write was successful to prevent an inconsistent state
-        let result = self.log.write(buf)?;
+        let result = self.log.write_all(buf)?;
         self.current_byte_size += buf.len() as u64;
         Ok(result)
     }
