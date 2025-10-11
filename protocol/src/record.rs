@@ -68,7 +68,7 @@ fn serialize_record(record: &Record, offset_delta: u32, base_timestamp: u64) -> 
     payload_bytes.extend(encode_var_int(vec_len_as_u32(&record.headers)));
 
     for header in record.headers.iter() {
-        serialize_header(&header, &mut payload_bytes);
+        serialize_header(header, &mut payload_bytes);
     }
 
     payload_bytes
@@ -115,7 +115,7 @@ pub fn deserialize_batch(bytes: Vec<u8>) -> RecordBatch {
         panic!("Expected exactly {record_byte_count} bytes for compressed records but had {actual_record_byte_count}");
     }
 
-    let record_bytes = snappy_decompress(&compressed_record_bytes);
+    let record_bytes = snappy_decompress(compressed_record_bytes);
 
     let mut remaining_record_bytes: &[u8] = &record_bytes;
     let mut records = Vec::new();
@@ -139,7 +139,7 @@ fn read_next_record(bytes: &[u8], base_timestamp: u64) -> (&[u8], Record) {
 
     let initial_slice_length = bytes.len();
     let (bytes, timestamp_delta) = decode_next_var_long(bytes);
-    let (bytes, _) = decode_next_var_int(&bytes); // TODO: do we need the offset?
+    let (bytes, _) = decode_next_var_int(bytes); // TODO: do we need the offset?
 
     let (bytes, key_length) = decode_next_var_int(bytes);
     let (bytes, key) = read_string_of_length(bytes, key_length);
@@ -199,6 +199,6 @@ fn read_string_of_length(bytes: &[u8], key_length: u32) -> (&[u8], String) {
 
 // I want collection sizes to have a known number of bytes in the binary. u32 is more than enough to store the number of records in a batch,
 // and it's unreasonable to expect the size to be any larger.
-fn vec_len_as_u32<T>(vec: &Vec<T>) -> u32 {
+fn vec_len_as_u32<T>(vec: &[T]) -> u32 {
     u32::try_from(vec.len()).unwrap()
 }

@@ -9,13 +9,13 @@ use crate::client::Error::InvalidReadOffset;
 #[path = "./client_test.rs"]
 mod client_test;
 
-const SQL_CREATE_TOPICS: &'static str =
+const SQL_CREATE_TOPICS: &str =
     "CREATE TABLE IF NOT EXISTS topics (
         name            STRING PRIMARY KEY,
         partition_count INTEGER NOT NULL
     )";
 
-const SQL_CREATE_WRITE_OFFSETS: &'static str =
+const SQL_CREATE_WRITE_OFFSETS: &str =
     "CREATE TABLE IF NOT EXISTS write_offsets (
         topic     STRING,
         partition INTEGER,
@@ -23,7 +23,7 @@ const SQL_CREATE_WRITE_OFFSETS: &'static str =
         PRIMARY KEY(topic, partition)
     )";
 
-const SQL_CREATE_READ_OFFSETS: &'static str =
+const SQL_CREATE_READ_OFFSETS: &str =
     "CREATE TABLE IF NOT EXISTS read_offsets (
         topic          STRING,
         partition      INTEGER,
@@ -31,8 +31,6 @@ const SQL_CREATE_READ_OFFSETS: &'static str =
         offset         INTEGER NOT NULL,
         PRIMARY KEY(topic, partition, consumer_group)
     )";
-
-
 
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub struct Topic {
@@ -179,7 +177,7 @@ impl Client {
         let write_offset = self.get_write_offset(topic, partition)?;
         if let Some(max_offset) = write_offset && offset > max_offset {
             return Err(InvalidReadOffset(InvalidOffset::TooLarge { max_offset, invalid_offset: offset }));
-        } else if write_offset == None {
+        } else if write_offset.is_none() {
             return Err(InvalidReadOffset(InvalidOffset::NoDataWritten));
         }
 

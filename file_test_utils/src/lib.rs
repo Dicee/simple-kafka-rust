@@ -23,7 +23,7 @@ impl TempTestDir {
         let temp_dir = Uuid::new_v4().to_string();
         let path = format!("{unit_tests_dir}/{temp_dir}");
 
-        fs::create_dir_all(&path).expect("Unable to create test directory");
+        fs::create_dir_all(&path).unwrap_or_else(|_| panic!("Unable to create test directory"));
         TempTestDir { path }
     }
 
@@ -90,7 +90,7 @@ impl Drop for TempTestDir {
 }
 
 pub fn assert_file_has_content(path: &str, content: &str) {
-    assert_eq!(read_to_string(path).expect(&format!("Failed to read content as string for path {path}")), content)
+    assert_eq!(read_to_string(path).unwrap_or_else(|_| panic!("Failed to read content as string for path {path}")), content)
 }
 
 fn get_unit_tests_dir() -> String {
@@ -102,6 +102,6 @@ fn get_unit_tests_dir() -> String {
 fn ensure_trailing_slash(s: &str) -> String {
     let mut s = s.to_string();
     if s.is_empty() { return s; }
-    s.push_str("/");
+    s.push('/');
     s
 }

@@ -44,7 +44,7 @@ impl LogManager {
     /// Writes, without committing, arbitrary bytes to a given topic and partition. To prevent potential data loss, [Self::commit] must be called
     /// when your business logic allows to ensure the data has been persisted. Similarly to the data layout we chose for [RotatingAppendOnlyLog],
     /// we'll only allow up to 1000 partitions, which is more than enough for the small scale we will test the project at.
-    pub fn write(&mut self, topic: &str, partition: u32, buf: &[u8]) -> io::Result<usize> {
+    pub fn write(&mut self, topic: &str, partition: u32, buf: &[u8]) -> io::Result<()> {
         let log = self.log_files
             .entry(LogKey::new(topic, partition))
             .or_insert_with(|| {
@@ -55,7 +55,7 @@ impl LogManager {
                 }
             });
 
-        log.write(buf)
+        log.write_all(buf)
     }
 
     /// Flushes all buffered changes for a given topic and partition, or does nothing if nothing has been written to it.

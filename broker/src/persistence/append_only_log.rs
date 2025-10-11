@@ -76,17 +76,17 @@ impl RotatingAppendOnlyLog {
     /// Files are expected directly under the root path, any sub-directory and its contents will be silently ignored. Files which name
     /// does no starting with the specified base file name will also be skipped.
     ///
-    /// ## Errors
+    /// # Errors
     /// This function will panic if a file starting with the base file name has an invalid format. The parsing is quite relaxed, we only require
     /// that it contains at least one '.' character and that whatever comes after it is a valid u64. We could be more stringent on parsing since
     /// we know the format is exactly `format!("{base_file_name}.{index:05}")`, but this will do for our little project.
     pub fn open_latest(root_path: String, base_file_name: &'static str, max_byte_size: u64) -> io::Result<Self> {
         if fs::exists(&root_path)? {
-            let mut files = WalkDir::new(&root_path)
+            let files = WalkDir::new(&root_path)
                 .sort_by(|a, b| a.file_name().cmp(b.file_name()).reverse())
                 .into_iter();
 
-            while let Some(ref file) = files.next() {
+            for ref file in files {
                 let f = to_io_res(file)?;
                 let file_name = f.file_name().to_str().unwrap();
 
@@ -103,8 +103,8 @@ impl RotatingAppendOnlyLog {
     }
 
     fn parse_index(file_name: &str) -> u32 {
-        let dot_index = file_name.rfind('.').expect(&format!("Invalid file name {file_name}, it should have at least one . character"));
-        file_name[dot_index + 1..].parse::<u32>().expect(&format!("Invalid file name {file_name}, failed to parse the index number"))
+        let dot_index = file_name.rfind('.').unwrap_or_else(|| panic!("Invalid file name {file_name}, it should have at least one . character"));
+        file_name[dot_index + 1..].parse::<u32>().unwrap_or_else(|_| panic!("Invalid file name {file_name}, failed to parse the index number"))
     }
 
     fn open(root_path: String, base_file_name: &'static str, log_index: u32, max_byte_size: u64) -> io::Result<Self> {
@@ -126,7 +126,7 @@ impl RotatingAppendOnlyLog {
     }
 
     fn get_next_log_name(&self) -> String {
-        Self::get_log_name(&self.root_path, &self.base_file_name, self.log_index + 1)
+        Self::get_log_name(&self.root_path, self.base_file_name, self.log_index + 1)
     }
 
     fn get_log_name(root_path: &String, base_file_name: &str, log_index: u32) -> String {
@@ -148,9 +148,9 @@ impl LogFile for RotatingAppendOnlyLog {
         }
 
         // order matters as we only update the size if the write was successful to prevent an inconsistent state
-        let result = self.log.write_all(buf)?;
+        self.log.write_all(buf)?;
         self.current_byte_size += buf.len() as u64;
-        Ok(result)
+        Ok(())
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -161,6 +161,6 @@ impl LogFile for RotatingAppendOnlyLog {
 fn to_io_res<T>(entry: &walkdir::Result<T>) -> io::Result<&T> {
     match entry {
         Ok(f) => Ok(f),
-        Err(e) => Err(io::Error::new(io::ErrorKind::Other, format!("{e:?}"))),
+        Err(e) => Err(io::Error::other(format!("{e:?}"))),
     }
 }

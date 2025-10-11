@@ -24,7 +24,7 @@ pub fn encode_var_long(n: u64) -> Vec<u8> {
         let mut byte = (rest & 0x7f) as u8;
         rest >>= 7;
         if rest > 0 {
-            byte = byte | 0x80;
+            byte |= 0x80;
         }
         bytes.push(byte);
     }
