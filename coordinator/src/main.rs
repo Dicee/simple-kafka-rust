@@ -1,11 +1,13 @@
 use argh::FromArgs;
-use simple_server::{Builder, Request, ResponseBuilder, ResponseResult, Server, StatusCode};
+use simple_server::{Builder, Method, Request, ResponseBuilder, ResponseResult, Server, StatusCode};
 use std::fmt::Display;
 use std::path::Path;
 
-use coordinator::dao::Error::{Internal, TopicNotFound};
-use coordinator::dao::{self, Dao};
+use crate::dao::Dao;
+use crate::dao::Error::{Internal, TopicNotFound};
 use serde::{Deserialize, Serialize};
+
+mod dao;
 
 #[cfg(test)]
 mod main_test;
@@ -34,22 +36,22 @@ fn main() {
         let uri = request.uri();
 
         let response: ResponseResult = match uri.path() {
-            "/create-topic" => 
-                handle(&request, &mut response, |r: CreateTopicRequest| dao.create_topic(&r.name, r.partition_count)),
+            "/create-topic" =>
+                handle(Method::POST, &request, &mut response, |r: CreateTopicRequest| dao.create_topic(&r.name, r.partition_count)),
             "/get-topic" =>
-                handle(&request, &mut response, |r: GetTopicRequest| dao.get_topic(&r.name)
+                handle(Method::GET, &request, &mut response, |r: GetTopicRequest| dao.get_topic(&r.name)
                     .map(|topic| GetTopicResponse { name: topic.name, partition_count: topic.partition_count})
                 ),
             "/increment-write-offset" =>
-                handle(&request, &mut response, |r: IncrementWriteOffsetRequest| dao.inc_write_offset_by(&r.topic, r.partition, r.inc)),
+                handle(Method::POST, &request, &mut response, |r: IncrementWriteOffsetRequest| dao.inc_write_offset_by(&r.topic, r.partition, r.inc)),
             "/get-write-offset" =>
-                handle(&request, &mut response, |r: GetWriteOffsetRequest| dao.get_write_offset(&r.topic, r.partition)
+                handle(Method::GET, &request, &mut response, |r: GetWriteOffsetRequest| dao.get_write_offset(&r.topic, r.partition)
                     .map(|offset| GetWriteOffsetResponse { offset })
                 ),
             "/ack-read-offset" =>
-                handle(&request, &mut response, |r: AckReadOffsetRequest| dao.ack_read_offset(&r.topic, r.partition, &r.consumer_group, r.offset)),
+                handle(Method::POST, &request, &mut response, |r: AckReadOffsetRequest| dao.ack_read_offset(&r.topic, r.partition, &r.consumer_group, r.offset)),
             "/get-read-offset" =>
-                handle(&request, &mut response, |r: GetReadOffsetRequest| dao.get_read_offset(&r.topic, r.partition, &r.consumer_group)
+                handle(Method::GET, &request, &mut response, |r: GetReadOffsetRequest| dao.get_read_offset(&r.topic, r.partition, &r.consumer_group)
                     .map(|offset| GetReadOffsetResponse { offset })
                 ),
             _ => {
@@ -61,12 +63,18 @@ fn main() {
     server.listen(&args.host, &args.port.to_string());
 }
 
-fn handle<Req, Res, H>(request: &Request<Vec<u8>>, response: &mut ResponseBuilder, do_handle: H) -> ResponseResult
+fn handle<Req, Res, H>(method: Method, request: &Request<Vec<u8>>, response: &mut ResponseBuilder, do_handle: H) -> ResponseResult
 where
     Req: for<'de> Deserialize<'de>,
     Res: Serialize,
     H: FnOnce(Req) -> dao::Result<Res>,
 {
+    let actual_method = request.method();
+    if actual_method != method {
+        let msg = format!("{actual_method} method not allowed for this resource. {method} was expected.");
+        return handle_error(response, msg, StatusCode::METHOD_NOT_ALLOWED);
+    }
+
     let request = match serde_json::from_slice::<Req>(request.body()) {
         Ok(request) => request,
         Err(e) => {

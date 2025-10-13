@@ -1,9 +1,9 @@
 use super::handle;
 use crate::dao;
 use assertor::{assert_that, EqualityAssertion};
-use coordinator::dao::{InvalidOffset::*, Topic};
+use super::dao::{InvalidOffset::*, Topic};
 use serde::{Deserialize, Serialize};
-use simple_server::{Request, ResponseBuilder, ResponseResult, StatusCode};
+use simple_server::{Method, Request, ResponseBuilder, ResponseResult, StatusCode};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct TestRequest {
@@ -18,10 +18,10 @@ struct TestResponse {
 #[test]
 fn test_handle_success() {
     let request_body = serde_json::to_vec(&TestRequest { value: String::from("test") }).unwrap();
-    let request = Request::new(request_body);
+    let request = new_request(Method::GET, request_body);
     let mut response_builder = ResponseBuilder::new();
 
-    let result = handle(&request, &mut response_builder, |req: TestRequest| {
+    let result = handle(Method::GET, &request, &mut response_builder, |req: TestRequest| {
         Ok(TestResponse { value: req.value })
     });
 
@@ -29,12 +29,26 @@ fn test_handle_success() {
 }
 
 #[test]
+fn test_handle_method_not_allowed() {
+    let request = new_request(Method::POST, Vec::new());
+
+    let mut response_builder = ResponseBuilder::new();
+    let result = handle(Method::GET, &request, &mut response_builder, |req: TestRequest| {
+        Ok(TestResponse { value: req.value })
+    });
+
+    assert_that_response_is(result, StatusCode::METHOD_NOT_ALLOWED,
+        "{\"status_code\":405,\"message\":\"POST method not allowed for this resource. GET was expected.\"}")
+}
+
+#[test]
 fn test_handle_request_deserialization_error() {
     let request_body = "{}".as_bytes().to_vec();
-    let request = Request::new(request_body);
+    let request = new_request(Method::GET, request_body);
+
     let mut response_builder = ResponseBuilder::new();
 
-    let result = handle(&request, &mut response_builder, |_: TestRequest| {
+    let result = handle(Method::GET, &request, &mut response_builder, |_: TestRequest| {
         Ok(TestResponse { value: "".to_string() })
     });
 
@@ -82,10 +96,10 @@ fn test_handle_dao_error_internal() {
 
 fn test_handle_dao_error_base(error: dao::Error) -> ResponseResult {
     let request_body = serde_json::to_vec(&TestRequest { value: "test".to_string() }).unwrap();
-    let request = Request::new(request_body);
+    let request = new_request(Method::GET, request_body);
     let mut response_builder = ResponseBuilder::new();
 
-    handle(&request, &mut response_builder, |_: TestRequest| {
+    handle(Method::GET, &request, &mut response_builder, |_: TestRequest| {
         Err::<String, dao::Error>(error)
     })
 }
@@ -96,4 +110,10 @@ fn assert_that_response_is(result: ResponseResult, status_code: StatusCode, expe
 
     assert_that!(response.status()).is_equal_to(status_code);
     assert_that!(response_body).is_equal_to(String::from(expected_body));
+}
+
+fn new_request(method: Method, request_body: Vec<u8>) -> Request<Vec<u8>> {
+    let mut request = Request::new(request_body);
+    *request.method_mut() = method;
+    request
 }
