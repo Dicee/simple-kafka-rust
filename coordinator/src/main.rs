@@ -35,7 +35,7 @@ fn main() {
 
         let response: ResponseResult = match uri.path() {
             "/create-topic" => 
-                handle_create_topic(&dao, &request, &mut response),
+                handle(&request, &mut response, |r: CreateTopicRequest| dao.create_topic(&r.name, r.partition_count)),
             "/get-topic" =>
                 handle(&request, &mut response, |r: GetTopicRequest| dao.get_topic(&r.name)
                     .map(|topic| GetTopicResponse { name: topic.name, partition_count: topic.partition_count})
@@ -59,10 +59,6 @@ fn main() {
         response
     });
     server.listen(&args.host, &args.port.to_string());
-}
-
-fn handle_create_topic(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
-    handle(&request, &mut response, |r: CreateTopicRequest| dao.create_topic(&r.name, r.partition_count))
 }
 
 fn handle<Req, Res, H>(request: &Request<Vec<u8>>, response: &mut ResponseBuilder, do_handle: H) -> ResponseResult
