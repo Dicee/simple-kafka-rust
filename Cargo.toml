@@ -3,5 +3,9 @@ resolver = "3"
 members = ["broker", "coordinator", "file_test_utils", "protocol"]
 
 [workspace.dependencies]
+argh = "0.1.13"
 assertor = "0.0.4"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+simple-server = "0.4.0"
 walkdir = "2.5.0"
