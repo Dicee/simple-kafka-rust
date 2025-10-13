@@ -5,12 +5,14 @@ edition = "2024"
 
 [dependencies]
 argh.workspace = true
+mockall.workspace = true
 rusqlite = {version = "0.37.0", features = ["bundled"]}
 r2d2 = "0.8.10"
 r2d2_sqlite = "0.31.0"
 serde.workspace = true
 serde_json.workspace = true
 simple-server.workspace = true
+ureq.workspace = true
 
 [dev-dependencies]
 assertor.workspace = true
