@@ -1,11 +1,12 @@
 use argh::FromArgs;
+use serde::{Deserialize, Serialize};
 use simple_server::{Builder, Method, Request, ResponseBuilder, ResponseResult, Server, StatusCode};
 use std::fmt::Display;
 use std::path::Path;
 
 use crate::dao::Dao;
 use crate::dao::Error::{Internal, TopicNotFound};
-use serde::{Deserialize, Serialize};
+use coordinator::model::*;
 
 mod dao;
 
@@ -115,75 +116,4 @@ fn handle_error(response: &mut Builder, error_msg: String, status_code: StatusCo
 
     response.status(status_code);
     Ok(response.body(response_bytes)?)
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq)]
-struct CreateTopicRequest {
-    name: String,
-    partition_count: u32,
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq)]
-struct GetTopicRequest {
-    name: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq)]
-struct GetTopicResponse {
-    name: String,
-    partition_count: u32,
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq)]
-struct IncrementWriteOffsetRequest {
-    topic: String,
-    partition: u32,
-    inc: u32,
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq)]
-struct GetWriteOffsetRequest {
-    topic: String,
-    partition: u32,
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq)]
-struct GetWriteOffsetResponse {
-    offset: Option<u64>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq)]
-struct AckReadOffsetRequest {
-    topic: String,
-    partition: u32,
-    consumer_group: String,
-    offset: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq)]
-struct GetReadOffsetRequest {
-    topic: String,
-    partition: u32,
-    consumer_group: String,
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq)]
-struct GetReadOffsetResponse {
-    offset: Option<u64>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq)]
-struct ErrorResponse {
-    status_code: u16,
-    message: String,
 }

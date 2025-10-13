@@ -3,3 +3,4 @@
 //! in the global README (out-of-scope features).
 
 pub mod client;
+pub mod model;
