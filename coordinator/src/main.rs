@@ -37,31 +37,50 @@ fn main() {
         let uri = request.uri();
 
         let response: ResponseResult = match uri.path() {
-            "/create-topic" =>
-                handle(Method::POST, &request, &mut response, |r: CreateTopicRequest| dao.create_topic(&r.name, r.partition_count)),
-            "/get-topic" =>
-                handle(Method::GET, &request, &mut response, |r: GetTopicRequest| dao.get_topic(&r.name)
-                    .map(|topic| GetTopicResponse { name: topic.name, partition_count: topic.partition_count})
-                ),
-            "/increment-write-offset" =>
-                handle(Method::POST, &request, &mut response, |r: IncrementWriteOffsetRequest| dao.inc_write_offset_by(&r.topic, r.partition, r.inc)),
-            "/get-write-offset" =>
-                handle(Method::GET, &request, &mut response, |r: GetWriteOffsetRequest| dao.get_write_offset(&r.topic, r.partition)
-                    .map(|offset| GetWriteOffsetResponse { offset })
-                ),
-            "/ack-read-offset" =>
-                handle(Method::POST, &request, &mut response, |r: AckReadOffsetRequest| dao.ack_read_offset(&r.topic, r.partition, &r.consumer_group, r.offset)),
-            "/get-read-offset" =>
-                handle(Method::GET, &request, &mut response, |r: GetReadOffsetRequest| dao.get_read_offset(&r.topic, r.partition, &r.consumer_group)
-                    .map(|offset| GetReadOffsetResponse { offset })
-                ),
-            _ => {
-                handle_error(&mut response, format!("Unknown API {uri}"), StatusCode::NOT_FOUND)
-            },
+            CREATE_TOPIC => handle_create_topic(&dao, &request, &mut response),
+            GET_TOPIC => handle_get_topic(&dao, &request, &mut response),
+            INCREMENT_WRITE_OFFSET => handle_increment_write_offset(&dao, &request, &mut response),
+            GET_WRITE_OFFSET => handle_get_write_offset(&dao, &request, &mut response),
+            ACK_READ_OFFSET => handle_ack_read_offset(&dao, &request, &mut response),
+            GET_READ_OFFSET => handle_get_read_offset(&dao, &request, &mut response),
+            _ => handle_error(&mut response, format!("Unknown API {uri}"), StatusCode::NOT_FOUND),
         };
         response
     });
     server.listen(&args.host, &args.port.to_string());
+}
+
+fn handle_create_topic(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+    handle(Method::POST, &request, &mut response, |r: CreateTopicRequest| dao.create_topic(&r.name, r.partition_count))
+}
+
+fn handle_get_topic(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+    // see TODO.md (improvements) on why I'm using PUT for a read-only operation
+    handle(Method::POST, &request, &mut response, |r: GetTopicRequest| dao.get_topic(&r.name)
+        .map(|topic| GetTopicResponse { name: topic.name, partition_count: topic.partition_count })
+    )
+}
+
+fn handle_increment_write_offset(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+    handle(Method::POST, &request, &mut response, |r: IncrementWriteOffsetRequest| dao.inc_write_offset_by(&r.topic, r.partition, r.inc))
+}
+
+fn handle_get_write_offset(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+    // see TODO.md (improvements) on why I'm using PUT for a read-only operation
+    handle(Method::POST, &request, &mut response, |r: GetWriteOffsetRequest| dao.get_write_offset(&r.topic, r.partition)
+        .map(|offset| GetWriteOffsetResponse { offset })
+    )
+}
+
+fn handle_ack_read_offset(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+    handle(Method::POST, &request, &mut response, |r: AckReadOffsetRequest| dao.ack_read_offset(&r.topic, r.partition, &r.consumer_group, r.offset))
+}
+
+fn handle_get_read_offset(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+    // see TODO.md (improvements) on why I'm using PUT for a read-only operation
+    handle(Method::POST, &request, &mut response, |r: GetReadOffsetRequest| dao.get_read_offset(&r.topic, r.partition, &r.consumer_group)
+        .map(|offset| GetReadOffsetResponse { offset })
+    )
 }
 
 fn handle<Req, Res, H>(method: Method, request: &Request<Vec<u8>>, response: &mut ResponseBuilder, do_handle: H) -> ResponseResult

@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+pub const CREATE_TOPIC: &str = "/create-topic";
+pub const GET_TOPIC: &str = "/get-topic";
+pub const INCREMENT_WRITE_OFFSET: &str = "/increment-write-offset";
+pub const GET_WRITE_OFFSET: &str = "/get-write-offset";
+pub const ACK_READ_OFFSET: &str = "/ack-read-offset";
+pub const GET_READ_OFFSET: &str = "/get-read-offset";
+
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct CreateTopicRequest {
