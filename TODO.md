@@ -6,6 +6,7 @@
 - return fine-grained, strongly typed deserializable errors from my HTTP clients for API 4xx
 - use GET for read-only requests and serialize/deserialize the arguments in the URI rather than the body. I skipped this because I didn't want to write
   all this undifferentiated code, it's not the point of this project. Normally, you have frameworks taking care of that.
+- add proper logging
 
 ### Optimizations
 

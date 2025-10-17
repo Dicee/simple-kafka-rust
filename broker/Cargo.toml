@@ -12,3 +12,4 @@ walkdir.workspace = true
 [dev-dependencies]
 assertor.workspace = true
 file_test_utils = { path = "../file_test_utils" }
+ntest_timeout = "0.9.3"
