@@ -65,7 +65,7 @@ fn test_rotating_log_reader_moves_to_next_file() {
 }
 
 #[test]
-fn test_rotating_log_reader_seek() {
+fn test_rotating_log_reader_seek_back_and_forth() {
     let temp_dir = TempTestDir::create();
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
 
@@ -97,6 +97,20 @@ fn test_rotating_log_reader_seek_to_eof_and_rotate() {
 
     log_reader.seek(150).unwrap();
     assert_read_bytes_are(log_reader.read(14), "It's beautiful");
+}
+
+#[test]
+#[should_panic]
+fn test_rotating_log_reader_negative_seek_beyond_file_start() {
+    let temp_dir = TempTestDir::create();
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+
+    fs::create_dir_all(root_path.clone()).unwrap();
+    write_to_file(&root_path, "data.00003", "hello world! Nice to meet you!");
+
+    let mut log_reader = RotatingLogReader::open(root_path, BASE_FILE_NAME, 3).unwrap();
+
+    log_reader.seek(-1).unwrap();
 }
 
 fn assert_read_bytes_are(result: io::Result<Vec<u8>>, expected: &str) {
