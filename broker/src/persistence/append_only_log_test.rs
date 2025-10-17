@@ -99,7 +99,7 @@ fn test_open_existing_rotated_log() {
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
 
     fs::create_dir_all(root_path.clone()).unwrap();
-    write_to_file(&root_path, "data.00003","3");
+    write_to_file(&root_path, "data.00003", "3");
     write_to_file(&root_path, "data.00004", "4");
 
     // just to prove we ignore non-data files

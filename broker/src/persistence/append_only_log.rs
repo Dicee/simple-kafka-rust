@@ -129,7 +129,7 @@ impl RotatingAppendOnlyLog {
         Self::get_log_name(&self.root_path, self.base_file_name, self.log_index + 1)
     }
 
-    fn get_log_name(root_path: &String, base_file_name: &str, log_index: u32) -> String {
+    pub(crate) fn get_log_name(root_path: &str, base_file_name: &str, log_index: u32) -> String {
         format!("{root_path}/{base_file_name}.{log_index:05}")
     }
 }
