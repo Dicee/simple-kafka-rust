@@ -41,3 +41,4 @@ The below features seem too difficult to implement for the amount of time I woul
   about consumer groups, we would normally need a whole service for this (e.g. ZooKeeper, maybe a DB, or a custom process running on brokers), but we'll simplify things and have 
   a container act as this service. It will be allowed to store data in memory or on disk (e.g. via an SQLite database) without concerning itself with scalability, durability or
   availability.
+- we'll only support offset-based look-ups, no timestamp-based

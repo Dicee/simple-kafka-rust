@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-walkdir.workspace = true
+coordinator = { path = "../coordinator" }
 protocol = { path = "../protocol" }
+tokio.workspace = true
+walkdir.workspace = true
 
 [dev-dependencies]
 assertor.workspace = true

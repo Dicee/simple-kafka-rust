@@ -54,7 +54,7 @@ pub struct RotatingLogReader {
 }
 
 impl RotatingLogReader {
-    fn open(root_path: String, base_file_name: &'static str, log_index: u32) -> io::Result<Self> {
+    pub fn open(root_path: String, base_file_name: &'static str, log_index: u32) -> io::Result<Self> {
         let file_name = RotatingAppendOnlyLog::get_log_name(&root_path, base_file_name, log_index);
         let next_file_name = RotatingAppendOnlyLog::get_log_name(&root_path, base_file_name, log_index + 1);
         Ok(Self {
@@ -66,14 +66,14 @@ impl RotatingLogReader {
         })
     }
 
-    /// See [LogReader]. Note that this method won't trigger any rotation,only reading data will do that.
-    fn seek(&mut self, byte_offset: i64) -> io::Result<()> {
+    /// Seeks [LogReader]. Note that this method won't trigger any rotation,only reading data will do that.
+    pub fn seek(&mut self, byte_offset: i64) -> io::Result<()> {
         self.log_reader.seek(byte_offset)
     }
 
     /// Reads the exact amount of bytes requested, or 0 bytes if we are currently at the end of the file and no new rotated file
     /// exists yet. The data may be from the current file or the next one, as this method can trigger a rotation.
-    fn read(&mut self, len: usize) -> io::Result<Vec<u8>> {
+    pub fn read(&mut self, len: usize) -> io::Result<Vec<u8>> {
         if self.log_reader.is_eof()? {
             return if fs::exists(&self.next_file_name)? {
                 let next_file_name = self.get_next_file_name();
