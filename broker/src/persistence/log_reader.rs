@@ -2,6 +2,7 @@ use crate::persistence::append_only_log::RotatingAppendOnlyLog;
 use std::fs;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
 
 #[cfg(test)]
 #[path = "log_reader_test.rs"]
@@ -14,7 +15,7 @@ struct LogReader {
 }
 
 impl LogReader {
-    fn open(path: &str) -> io::Result<Self> {
+    fn open(path: &Path) -> io::Result<Self> {
         Ok(Self { reader: BufReader::new(File::open(path)?) })
     }
 
@@ -48,7 +49,7 @@ impl LogReader {
 pub struct RotatingLogReader {
     root_path: String,
     base_file_name: &'static str,
-    next_file_name: String,
+    next_file_name: PathBuf,
     log_index: u32,
     log_reader: LogReader,
 }
@@ -88,7 +89,7 @@ impl RotatingLogReader {
         self.log_reader.read_exact(len)
     }
 
-    fn get_next_file_name(&self) -> String {
+    fn get_next_file_name(&self) -> PathBuf {
         RotatingAppendOnlyLog::get_log_name(&self.root_path, self.base_file_name, self.log_index + 1)
     }
 }

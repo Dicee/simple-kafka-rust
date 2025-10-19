@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 coordinator = { path = "../coordinator" }
+mockall.workspace = true
 protocol = { path = "../protocol" }
 tokio.workspace = true
 walkdir.workspace = true

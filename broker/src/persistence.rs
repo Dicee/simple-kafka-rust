@@ -1,8 +1,9 @@
-pub(crate) mod append_only_log;
+mod append_only_log;
+mod log_reader;
+mod indexing;
 
 #[cfg(test)]
 mod persistence_test;
-mod log_reader;
 
 use crate::persistence::log_reader::RotatingLogReader;
 use append_only_log::*;
@@ -114,7 +115,6 @@ impl LogManager {
         Ok(match self.log_files.entry(LogKey::new(topic, partition)) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-
                 let log_manager = PartitionLogManager::new(
                     &self.root_path,
                     topic, partition,
@@ -228,7 +228,7 @@ impl PartitionLogManager {
             Entry::Vacant(entry) => {
                 let (reader_tx, reader_rx) = std::sync::mpsc::channel();
                 let mut reader = PartitionLogReader {
-                    // we don't support lookup by offset yet so we always start from the start
+                    // we don't support lookup by offset yet so we always start from the beginning of the first file
                     reader: RotatingLogReader::open(self.root_path.clone(), BASE_FILE_NAME, 0).map_err(|e| ReadError::Io(e))?,
                     read_requests: reader_rx,
                     shutdown: Arc::clone(&self.shutdown),
@@ -252,7 +252,7 @@ impl PartitionLogManager {
     }
 
     fn shutdown(self) -> thread::Result<()> {
-        println!("Shutting down partition under root path{}... Waiting for {} reader(s) and 1 writer to shut down.",
+        println!("Shutting down partition under root path {}... Waiting for {} reader(s) and 1 writer to shut down.",
                  self.root_path, self.consumers.len());
 
         self.consumers.into_iter()

@@ -80,6 +80,7 @@ dependencies = [
  "assertor",
  "coordinator",
  "file_test_utils",
+ "mockall",
  "ntest_timeout",
  "protocol",
  "tokio",

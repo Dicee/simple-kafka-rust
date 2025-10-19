@@ -29,8 +29,17 @@ pub struct Header {
     pub value: String,
 }
 
+/// Serializes the batch in binary format into a new vector and returns it
 pub fn serialize_batch(batch: RecordBatch) -> Vec<u8> {
     let mut bytes = Vec::new();
+    serialize_batch_into(batch, &mut bytes);
+    bytes
+}
+
+/// Serializes the batch in binary format into an existing vector. This is useful when some header information needs to be added and written to disk
+/// in one go without any copy. I prefer writing in one go (even though the actual writer will likely make several disk calls) because it decreases the
+/// chance of leaving the data in a corrupted state, say if the header was written but the data failed being written.
+pub fn serialize_batch_into(batch: RecordBatch, bytes: &mut Vec<u8>) {
     bytes.push(batch.protocol_version);
     bytes.extend(&batch.base_timestamp.to_le_bytes());
 
@@ -47,8 +56,6 @@ pub fn serialize_batch(batch: RecordBatch) -> Vec<u8> {
     let compressed_record_bytes = snappy_compress(record_bytes);
     bytes.extend(vec_len_as_u32(&compressed_record_bytes).to_le_bytes());
     bytes.extend(compressed_record_bytes);
-
-    bytes
 }
 
 fn serialize_record(record: &Record, offset_delta: u32, base_timestamp: u64) -> Vec<u8> {

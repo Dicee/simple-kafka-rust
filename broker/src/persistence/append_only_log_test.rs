@@ -78,7 +78,7 @@ fn test_drop() {
 #[test]
 fn test_open_new_rotated_log() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     // just to prove we ignore non-data files
     fs::create_dir_all(root_path.clone()).unwrap();
@@ -96,7 +96,7 @@ fn test_open_new_rotated_log() {
 #[test]
 fn test_open_existing_rotated_log() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     fs::create_dir_all(root_path.clone()).unwrap();
     write_to_file(&root_path, "data.00003", "3");
@@ -117,7 +117,7 @@ fn test_open_existing_rotated_log() {
 #[test]
 fn test_open_rotated_log_already_at_max_bytes() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     let existing_file_path = format!("{root_path}data.00003");
     let existing_content = "Woooow this is already too long buddy!";
@@ -139,7 +139,7 @@ fn test_open_rotated_log_already_at_max_bytes() {
 #[should_panic(expected = "Invalid file name data00003, it should have at least one . character")]
 fn test_open_rotated_malformed_index_no_dot() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     let existing_file_path = format!("{root_path}data00003");
 
@@ -153,7 +153,7 @@ fn test_open_rotated_malformed_index_no_dot() {
 #[should_panic(expected = "Invalid file name data.00$03, failed to parse the index number")]
 fn test_open_rotated_malformed_index_not_a_number() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     let existing_file_path = format!("{root_path}data.00$03");
 
@@ -166,7 +166,7 @@ fn test_open_rotated_malformed_index_not_a_number() {
 #[test]
 fn test_rotate() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     let mut log = new_rotated_log(root_path);
 
@@ -195,7 +195,7 @@ fn test_rotate() {
 #[should_panic(expected = "Next rotated file should not already exist, but did")]
 fn test_rotate_while_next_file_exists() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     let content = "1234";
     fs::create_dir_all(root_path.clone()).unwrap();
@@ -210,7 +210,7 @@ fn test_rotate_while_next_file_exists() {
 #[test]
 fn test_drop_rotated_log() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
     let expected_path = format!("{root_path}data.00000");
 
     let content = "How are you doing mate?";

@@ -13,7 +13,7 @@ const GROUP2: &str = "group2";
 #[test]
 fn test_read_seek_and_write_to_several_topics_and_shutdown() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/topics", temp_dir.path());
+    let root_path = format!("{}/topics", temp_dir.path_as_str());
 
     let mut log_manager = LogManager::new_with_loop_timeout(root_path.clone(), DEFAULT_LOOP_TIMEOUT);
 
@@ -52,7 +52,7 @@ fn test_read_seek_and_write_to_several_topics_and_shutdown() {
 #[test]
 fn test_write_without_flushing() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/topics", temp_dir.path());
+    let root_path = format!("{}/topics", temp_dir.path_as_str());
 
     let mut log_manager = LogManager::new_with_loop_timeout(root_path.clone(), DEFAULT_LOOP_TIMEOUT);
 
@@ -68,7 +68,7 @@ fn test_write_without_flushing() {
 #[test]
 fn test_read_at_eof_and_then_write() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/topics", temp_dir.path());
+    let root_path = format!("{}/topics", temp_dir.path_as_str());
     let mut log_manager = LogManager::new_with_loop_timeout(root_path.clone(), DEFAULT_LOOP_TIMEOUT);
 
     write_to(&mut log_manager, "topic1", 0, "Hi sir!");
@@ -85,7 +85,7 @@ fn test_read_at_eof_and_then_write() {
 #[test]
 fn test_read_before_writing_anything() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/topics", temp_dir.path());
+    let root_path = format!("{}/topics", temp_dir.path_as_str());
 
     let mut log_manager = LogManager::new_with_loop_timeout(root_path.clone(), DEFAULT_LOOP_TIMEOUT);
 
@@ -99,7 +99,7 @@ fn test_read_before_writing_anything() {
 #[test]
 fn test_read_past_eof() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/topics", temp_dir.path());
+    let root_path = format!("{}/topics", temp_dir.path_as_str());
 
     let mut log_manager = LogManager::new_with_loop_timeout(root_path.clone(), DEFAULT_LOOP_TIMEOUT);
     write_to(&mut log_manager, "topic1", 0, "Hi sir!");

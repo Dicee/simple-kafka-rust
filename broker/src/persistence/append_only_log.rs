@@ -2,7 +2,7 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 #[cfg(test)]
@@ -23,8 +23,7 @@ pub struct AppendOnlyLog {
 impl AppendOnlyLog {
     /// Will create the file if it doesn't exist (creating missing directories in the path if needed), or open it
     /// in append mode otherwise.
-    pub fn open(path: &str) -> io::Result<Self> {
-        let path = Path::new(path);
+    pub fn open(path: &Path) -> io::Result<Self> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -125,12 +124,12 @@ impl RotatingAppendOnlyLog {
         })
     }
 
-    fn get_next_log_name(&self) -> String {
+    fn get_next_log_name(&self) -> PathBuf {
         Self::get_log_name(&self.root_path, self.base_file_name, self.log_index + 1)
     }
 
-    pub(crate) fn get_log_name(root_path: &str, base_file_name: &str, log_index: u32) -> String {
-        format!("{root_path}/{base_file_name}.{log_index:05}")
+    pub(crate) fn get_log_name(root_path: &str, base_file_name: &str, log_index: u32) -> PathBuf {
+        PathBuf::from(&format!("{root_path}/{base_file_name}.{log_index:05}"))
     }
 }
 
@@ -140,7 +139,7 @@ impl LogFile for RotatingAppendOnlyLog {
         if buf.len() as u64 + self.current_byte_size >= self.max_byte_size {
             self.flush()?;
             let full_path = self.get_next_log_name();
-            assert!(!fs::exists(&full_path)?, "Next rotated file should not already exist, but did. Path: {full_path}");
+            assert!(!fs::exists(&full_path)?, "Next rotated file should not already exist, but did. Path: {full_path:?}");
 
             self.log = AppendOnlyLog::open(&full_path)?;
             self.current_byte_size = 0;

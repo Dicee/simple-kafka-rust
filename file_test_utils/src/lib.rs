@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::fs::read_to_string;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use assertor::{assert_that, VecAssertion};
 use walkdir::WalkDir;
@@ -40,7 +41,13 @@ impl TempTestDir {
         assert_that!(files).contains_exactly_in_order(expected_files_in_order);
     }
 
-    pub fn path(&self) -> &str { self.path.as_str() }
+    pub fn resolve(&self, child_path: &str) -> PathBuf {
+        PathBuf::from(&self.path).join(child_path)
+    }
+
+    pub fn path_as_str(&self) -> &str { &self.path }
+
+    pub fn path(&self) -> &Path { Path::new(&self.path) }
 }
 
 impl TempTestFile {
@@ -78,7 +85,9 @@ impl TempTestFile {
 
     pub fn test_dir(&self) -> &TempTestDir { &self.test_dir }
 
-    pub fn path(&self) -> &str { self.path.as_str() }
+    pub fn path_as_str(&self) -> &str { self.path.as_str() }
+
+    pub fn path(&self) -> &Path { Path::new(&self.path) }
 }
 
 impl Drop for TempTestDir {

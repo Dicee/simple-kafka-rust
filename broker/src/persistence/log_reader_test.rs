@@ -33,7 +33,7 @@ fn test_log_reader_read_exact_eof() {
 #[test]
 fn test_rotating_log_reader_open_and_read_until_and_past_eof() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     fs::create_dir_all(root_path.clone()).unwrap();
     write_to_file(&root_path, "data.00003", "hello world! Nice to meet you!");
@@ -51,7 +51,7 @@ fn test_rotating_log_reader_open_and_read_until_and_past_eof() {
 #[test]
 fn test_rotating_log_reader_moves_to_next_file() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     fs::create_dir_all(root_path.clone()).unwrap();
     write_to_file(&root_path, "data.00003", "hello world! Nice to meet you!");
@@ -67,7 +67,7 @@ fn test_rotating_log_reader_moves_to_next_file() {
 #[test]
 fn test_rotating_log_reader_seek_back_and_forth() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     fs::create_dir_all(root_path.clone()).unwrap();
     write_to_file(&root_path, "data.00003", "hello world! Nice to meet you!");
@@ -85,7 +85,7 @@ fn test_rotating_log_reader_seek_back_and_forth() {
 #[test]
 fn test_rotating_log_reader_seek_to_eof_and_rotate() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     fs::create_dir_all(root_path.clone()).unwrap();
     write_to_file(&root_path, "data.00003", "hello world! Nice to meet you!");
@@ -103,7 +103,7 @@ fn test_rotating_log_reader_seek_to_eof_and_rotate() {
 #[should_panic]
 fn test_rotating_log_reader_negative_seek_beyond_file_start() {
     let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path());
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     fs::create_dir_all(root_path.clone()).unwrap();
     write_to_file(&root_path, "data.00003", "hello world! Nice to meet you!");
