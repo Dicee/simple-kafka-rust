@@ -1,11 +1,12 @@
-use super::append_only_log::{AppendOnlyLog, RotatingAppendOnlyLog, LogFile};
+use super::append_only_log::{AppendOnlyLog, LogFile};
+use crate::persistence::LOG_EXTENSION;
+use mockall::automock;
+use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{BufReader, Read, Seek};
+use std::io::{BufRead, BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::{fs, io};
-use std::ffi::OsStr;
-use std::fmt::format;
-use mockall::automock;
+use walkdir::WalkDir;
 
 #[cfg(test)]
 #[path = "./indexing_test.rs"]
@@ -27,6 +28,7 @@ mod indexing_test;
 /// We want to have roughly logarithmic (in the number of records) access to a record, so roughly 10 disk seeks to find the base offset of the batch.
 /// To achieve that, we need to index every 20 batches, namely every 1000 records.
 const MAX_INDEX_GAP: u64 = 1000;
+const INDEX_EXTENSION: &str = "index";
 
 #[automock]
 pub trait LogIndexWriter {
@@ -63,7 +65,7 @@ impl BinaryLogIndexWriter {
     /// Note that the file's name must be composed of a [u64] index (first index in the file) and an optional extension. The function will panic if
     /// this condition is not met as the index cannot work properly without it.
     pub fn open_for_log_file(path: &Path) -> io::Result<Self> {
-        let (_, index_file_path) = Self::log_path_to_index_path(path);
+        let (_, index_file_path) = log_path_to_index_path(path);
         let index_file = AppendOnlyLog::open(&index_file_path)?; // ensures the index file now exists
         let index = Self::extract_last_index(&index_file_path)?;
 
@@ -82,20 +84,10 @@ impl BinaryLogIndexWriter {
 
         // -16 to account for two u64 values
         reader.seek(io::SeekFrom::Start(file_len - 16))?;
-        Ok(read_u64(&mut reader)?)
-    }
+        let mut buf = [0_u8; 8];
+        reader.read_exact(&mut buf)?;
 
-    fn log_path_to_index_path(log_path: &Path) -> (u64, PathBuf) {
-        let extension_length = log_path.extension().map(OsStr::len).unwrap_or(0);
-        let log_file_name = log_path.file_name().unwrap().to_str().unwrap(); // we want to panic if the file's name is not expected
-
-        let index = log_file_name[0..(log_file_name.len() - extension_length - 1)]
-            .to_owned()
-            .parse::<u64>()
-            .expect(&format!("Log file names should be composed solely of a u64 index (first index in the log) and an \
-                optional extension but was: {}", &log_file_name));
-
-        (index, log_path.with_extension("index"))
+        Ok(u64::from_le_bytes(buf))
     }
 
     fn validate_index(&mut self, index: u64) {
@@ -120,7 +112,7 @@ impl LogIndexWriter for BinaryLogIndexWriter {
     fn ack_rotation(&mut self, new_path: &Path) -> io::Result<()> {
         self.flush()?;
 
-        let (first_index, new_index_file_path) = Self::log_path_to_index_path(new_path);
+        let (first_index, new_index_file_path) = log_path_to_index_path(new_path);
         let new_index_file = AppendOnlyLog::open(&new_index_file_path)?; // ensures the index file now exists
 
         self.index_file = new_index_file;
@@ -144,8 +136,109 @@ impl Drop for BinaryLogIndexWriter {
     }
 }
 
-fn read_u64(reader: &mut BufReader<File>) -> io::Result<u64> {
-    let mut buf = [0_u8; 8];
-    reader.read_exact(&mut buf)?;
-    Ok(u64::from_le_bytes(buf))
+#[derive(Eq, PartialEq, Debug)]
+pub struct IndexLookupResult {
+    log_file_path: PathBuf,
+    byte_offset: u64,
+}
+
+/// Finds the log file, if any, which contains a given index, and provides a byte offset within this file which is close to the actual byte offset
+/// of the corresponding record. The caller will need to make some disk seeks from this position to find the actual offset. This function is not
+/// very demanding (assuming a small number of log files), but it's also not extremely efficient. It will be slow if executed frequently. It is expected
+/// to be called mostly for initializing a log reader, and following that the reader is the one that has to track the offset. Note that [None] will be
+/// returned if no data has been written yet.
+pub fn look_up(root_path: &Path, index: u64) -> io::Result<Option<IndexLookupResult>> {
+    let mut index_files = Vec::new();
+
+    // not super elegant compared to using iterator methods, but it makes handling the many layers of Result nicely
+    // for entry in fs::read_dir(root_path)? {
+    //     let entry = entry?;
+    //     let path = entry.path();
+    //     let is_file = entry.file_type()?.is_file();
+    //     let extension = path.extension().map(|os_str| os_str.to_str().unwrap()).unwrap_or("");
+    //     if is_file && extension == LOG_EXTENSION {
+    //         let (start_index, _) = log_path_to_index_path(&path);
+    //         index_files.push((start_index, path.to_owned()));
+    //     }
+    // }
+
+    WalkDir::new(&root_path)
+        .sort_by_file_name()
+        .into_iter()
+        // not super elegant compared to using iterator methods, but it makes handling the many layers of Result nicely
+        .try_for_each(|entry| {
+            let entry = entry?;
+            let is_file = entry.file_type().is_file();
+            let x = entry.path();
+            let extension = x.extension().map(|os_str| os_str.to_str().unwrap()).unwrap_or("");
+            if is_file && extension == INDEX_EXTENSION {
+                let (start_index, _) = log_path_to_index_path(x);
+                index_files.push((start_index, x.to_owned()));
+            }
+            io::Result::Ok(())
+        })?;
+
+    if index_files.is_empty() { return Ok(None) }
+
+    let index_file_path = match index_files.binary_search_by_key(&index, |item| item.0) {
+        Ok(i) => &index_files[i].1,
+        Err(0) => &index_files[0].1,
+        Err(i) => { &index_files[i - 1].1 },
+    };
+
+    find_closest_byte_offset(index_file_path, index)
+}
+
+// A more efficient implementation could leverage a memory-mapped file but to simplify, I'll just load it in memory. With the assumptions
+// we made on file size and index sparsity,this is not going to be a large amount of data and we load a single index file at a time.
+fn find_closest_byte_offset(index_file_path: &Path, index: u64) -> io::Result<Option<IndexLookupResult>> {
+    let index_rows = parse_index_file(index_file_path)?;
+    let log_file_path = index_path_to_log_path(index_file_path).1;
+
+    let byte_offset = match index_rows.binary_search_by_key(&index, |item| item.0) {
+        Ok(i) => index_rows[i].1,
+        Err(0) => 0,
+        Err(i) => index_rows[i - 1].1,
+    };
+
+    Ok(Some(IndexLookupResult { log_file_path, byte_offset }))
+}
+
+fn parse_index_file(log_file_path: &Path) -> io::Result<Vec<(u64, u64)>> {
+    let mut rows = Vec::new();
+    let mut reader = BufReader::new(File::open(log_file_path)?);
+    let mut buf = [0u8; 8];
+
+    while reader.fill_buf()?.len() > 0 {
+        reader.read_exact(&mut buf)?;
+        let index = u64::from_le_bytes(buf);
+
+        reader.read_exact(&mut buf)?;
+        let byte_offset = u64::from_le_bytes(buf);
+
+        rows.push((index, byte_offset));
+    }
+
+    Ok(rows)
+}
+
+fn log_path_to_index_path(log_path: &Path) -> (u64, PathBuf) {
+    validate_path_and_change_extension(log_path, INDEX_EXTENSION)
+}
+
+fn index_path_to_log_path(log_path: &Path) -> (u64, PathBuf) {
+    validate_path_and_change_extension(log_path, LOG_EXTENSION)
+}
+
+fn validate_path_and_change_extension(log_path: &Path, new_extension: &str) -> (u64, PathBuf) {
+    let extension_length = log_path.extension().map(OsStr::len).unwrap_or(0);
+    let log_file_name = log_path.file_name().unwrap().to_str().unwrap(); // we want to panic if the file's name is not expected
+
+    let index = log_file_name[0..(log_file_name.len() - extension_length - 1)]
+        .to_owned()
+        .parse::<u64>()
+        .expect(&format!("Log file names should be composed solely of a u64 index (first index in the log) and an \
+                optional extension but was: {}", &log_file_name));
+
+    (index, log_path.with_extension(new_extension))
 }

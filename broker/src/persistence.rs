@@ -17,6 +17,7 @@ use std::time::Duration;
 use std::{io, iter, thread};
 use tokio::sync::oneshot;
 
+const LOG_EXTENSION: &str = "log";
 const BASE_FILE_NAME: &'static str = "data";
 // 10 MB to make it interesting to watch on low-scale examples, but of course not optimized for larger scale
 const MAX_FILE_SIZE_BYTES: u64 = 10 * 1024 * 1024;

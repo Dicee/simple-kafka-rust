@@ -1,5 +1,4 @@
-use std::io::BufRead;
-use assertor::{assert_that, EqualityAssertion};
+use assertor::{assert_that, EqualityAssertion, ResultAssertion};
 use file_test_utils::TempTestDir;
 use super::*;
 
@@ -134,29 +133,56 @@ fn test_writer_flush() {
 }
 
 fn assert_index_file_contains(path: &Path, rows: Vec<(u64, u64)>) {
-    assert_that!(parse_index_file(path)).is_equal_to(rows);
+    assert_that!(parse_index_file(path).unwrap()).is_equal_to(rows);
 }
 
-fn parse_index_file(log_file_path: &Path) -> Vec<(u64, u64)> {
-    let mut rows = Vec::new();
-    let mut reader = BufReader::new(File::open(log_file_path).unwrap());
-    let mut buf = [0u8; 8];
+#[test]
+fn test_lookup_no_index_file() {
+    let temp_dir = TempTestDir::create();
+    assert_that!(look_up(temp_dir.path(), 17)).has_ok(None);
+}
 
-    while reader.fill_buf().unwrap().len() > 0 {
-        reader.read_exact(&mut buf).unwrap();
-        let index = u64::from_le_bytes(buf);
+#[test]
+fn test_lookup() {
+    let temp_dir = TempTestDir::create();
 
-        reader.read_exact(&mut buf).unwrap();
-        let byte_offset = u64::from_le_bytes(buf);
+    let mut index_writer = new_index_writer(&temp_dir, "0000.log");
+    index_writer.ack_bytes_written(1500, 1).unwrap();
+    index_writer.ack_bytes_written(2700, 2).unwrap();
 
-        rows.push((index, byte_offset));
-    }
+    index_writer.ack_rotation(&temp_dir.resolve("3009.log")).unwrap();
+    index_writer.ack_bytes_written(4015, 3).unwrap();
+    index_writer.ack_bytes_written(5078, 4).unwrap();
 
-    rows
+    index_writer.ack_rotation(&temp_dir.resolve("6000.log")).unwrap();
+    index_writer.ack_bytes_written(7200, 5).unwrap();
+
+    index_writer.ack_rotation(&temp_dir.resolve("8500.log")).unwrap();
+    index_writer.flush().unwrap();
+
+    // one test case for each possible position with the above files, except exact index rows which I'm testing only once with 2700,
+    // and same thing for exact start index (tested once with 3009)
+    assert_look_up_returns(&temp_dir, 0, "0000.log", 0);
+    assert_look_up_returns(&temp_dir, 17, "0000.log", 0);
+    assert_look_up_returns(&temp_dir, 1700, "0000.log", 1);
+    assert_look_up_returns(&temp_dir, 2700, "0000.log", 2);
+    assert_look_up_returns(&temp_dir, 3009, "3009.log", 0);
+    assert_look_up_returns(&temp_dir, 4000, "3009.log", 0);
+    assert_look_up_returns(&temp_dir, 5000, "3009.log", 3);
+    assert_look_up_returns(&temp_dir, 5090, "3009.log", 4);
+    assert_look_up_returns(&temp_dir, 6700, "6000.log", 0);
+    assert_look_up_returns(&temp_dir, 7500, "6000.log", 5);
+    assert_look_up_returns(&temp_dir, 8800, "8500.log", 0);
+}
+
+fn assert_look_up_returns(temp_dir: &TempTestDir, index: u64, expected_log_file: &str, expected_byte_offset: u64) {
+    assert_that!(look_up(temp_dir.path(), index)).has_ok(Some(IndexLookupResult {
+        log_file_path: temp_dir.resolve(expected_log_file),
+        byte_offset: expected_byte_offset
+    }));
 }
 
 fn new_index_writer(temp_dir: &TempTestDir, log_file_path: &str) -> BinaryLogIndexWriter {
     let index_writer = BinaryLogIndexWriter::open_for_log_file(&temp_dir.resolve(log_file_path)).unwrap();
     index_writer
 }
-
