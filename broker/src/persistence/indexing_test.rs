@@ -92,22 +92,23 @@ fn test_writer_ack_rotation() {
     let temp_dir = TempTestDir::create();
 
     {
-        let mut index_writer = new_index_writer(&temp_dir, "0000.log");
+        let mut index_writer = new_index_writer(&temp_dir, "00000.log");
         index_writer.ack_bytes_written(MAX_INDEX_GAP, 1).unwrap();
         index_writer.ack_bytes_written(2 * MAX_INDEX_GAP + 10, 2).unwrap();
 
-        index_writer.ack_rotation(&temp_dir.resolve("2011.log")).unwrap();
+        index_writer.ack_rotation(2011, 3).unwrap();
 
-        index_writer.ack_bytes_written(3 * MAX_INDEX_GAP, 3).unwrap(); // gap not large enough, ignored
-        index_writer.ack_bytes_written(3 * MAX_INDEX_GAP + 11, 4).unwrap();
+        index_writer.ack_bytes_written(3 * MAX_INDEX_GAP, 4).unwrap(); // gap not large enough, ignored
+        index_writer.ack_bytes_written(3 * MAX_INDEX_GAP + 11, 5).unwrap();
     }
 
-    assert_index_file_contains(&temp_dir.resolve("0000.index"), vec![
+    assert_index_file_contains(&temp_dir.resolve("00000.index"), vec![
         (MAX_INDEX_GAP, 1),
         (2 * MAX_INDEX_GAP + 10, 2),
+        (2 * MAX_INDEX_GAP + 11, 3), // the first index outside of the index file is always written at the end
     ]);
 
-    assert_index_file_contains(&temp_dir.resolve("2011.index"), vec![(3 * MAX_INDEX_GAP + 11, 4)]);
+    assert_index_file_contains(&temp_dir.resolve("02011.index"), vec![(3 * MAX_INDEX_GAP + 11, 5)]);
 }
 
 #[test]
@@ -117,23 +118,24 @@ fn test_writer_ack_rotation_index_smaller_than_last_written() {
 
     let mut index_writer = new_index_writer(&temp_dir, "0000.log");
     index_writer.ack_bytes_written(MAX_INDEX_GAP, 1).unwrap();
-    index_writer.ack_rotation(&temp_dir.resolve("0017.log")).unwrap();
+    index_writer.ack_rotation(17, 2).unwrap();
 }
 
 #[test]
 fn test_writer_flush() {
     let temp_dir = TempTestDir::create();
-    let mut index_writer = new_index_writer(&temp_dir, "0000.log");
+    let mut index_writer = new_index_writer(&temp_dir, "00000.log");
 
     index_writer.ack_bytes_written(MAX_INDEX_GAP, 1).unwrap();
-    assert_index_file_contains(&temp_dir.resolve("0000.index"), vec![]);
+    assert_index_file_contains(&temp_dir.resolve("00000.index"), vec![]);
 
     index_writer.flush().unwrap();
-    assert_index_file_contains(&temp_dir.resolve("0000.index"), vec![(MAX_INDEX_GAP, 1)]);
+    assert_index_file_contains(&temp_dir.resolve("00000.index"), vec![(MAX_INDEX_GAP, 1)]);
 }
 
 fn assert_index_file_contains(path: &Path, rows: Vec<(u64, u64)>) {
-    assert_that!(parse_index_file(path).unwrap()).is_equal_to(rows);
+    assert_that!(parse_index_file(path).expect(&format!("Failed to parse index file {path:?}")))
+        .is_equal_to(rows);
 }
 
 #[test]
@@ -146,33 +148,33 @@ fn test_lookup_no_index_file() {
 fn test_lookup() {
     let temp_dir = TempTestDir::create();
 
-    let mut index_writer = new_index_writer(&temp_dir, "0000.log");
+    let mut index_writer = new_index_writer(&temp_dir, "00000.log");
     index_writer.ack_bytes_written(1500, 1).unwrap();
     index_writer.ack_bytes_written(2700, 2).unwrap();
 
-    index_writer.ack_rotation(&temp_dir.resolve("3009.log")).unwrap();
-    index_writer.ack_bytes_written(4015, 3).unwrap();
-    index_writer.ack_bytes_written(5078, 4).unwrap();
+    index_writer.ack_rotation(3009, 3).unwrap();
+    index_writer.ack_bytes_written(4015, 4).unwrap();
+    index_writer.ack_bytes_written(5078, 5).unwrap();
 
-    index_writer.ack_rotation(&temp_dir.resolve("6000.log")).unwrap();
-    index_writer.ack_bytes_written(7200, 5).unwrap();
+    index_writer.ack_rotation(6000, 6).unwrap();
+    index_writer.ack_bytes_written(7200, 7).unwrap();
 
-    index_writer.ack_rotation(&temp_dir.resolve("8500.log")).unwrap();
+    index_writer.ack_rotation(8500, 8).unwrap();
     index_writer.flush().unwrap();
 
     // one test case for each possible position with the above files, except exact index rows which I'm testing only once with 2700,
     // and same thing for exact start index (tested once with 3009)
-    assert_look_up_returns(&temp_dir, 0, "0000.log", 0);
-    assert_look_up_returns(&temp_dir, 17, "0000.log", 0);
-    assert_look_up_returns(&temp_dir, 1700, "0000.log", 1);
-    assert_look_up_returns(&temp_dir, 2700, "0000.log", 2);
-    assert_look_up_returns(&temp_dir, 3009, "3009.log", 0);
-    assert_look_up_returns(&temp_dir, 4000, "3009.log", 0);
-    assert_look_up_returns(&temp_dir, 5000, "3009.log", 3);
-    assert_look_up_returns(&temp_dir, 5090, "3009.log", 4);
-    assert_look_up_returns(&temp_dir, 6700, "6000.log", 0);
-    assert_look_up_returns(&temp_dir, 7500, "6000.log", 5);
-    assert_look_up_returns(&temp_dir, 8800, "8500.log", 0);
+    assert_look_up_returns(&temp_dir, 0, "00000.log", 0);
+    assert_look_up_returns(&temp_dir, 17, "00000.log", 0);
+    assert_look_up_returns(&temp_dir, 1700, "00000.log", 1);
+    assert_look_up_returns(&temp_dir, 2700, "00000.log", 2);
+    assert_look_up_returns(&temp_dir, 3009, "03009.log", 0);
+    assert_look_up_returns(&temp_dir, 4000, "03009.log", 0);
+    assert_look_up_returns(&temp_dir, 5000, "03009.log", 4);
+    assert_look_up_returns(&temp_dir, 5090, "03009.log", 5);
+    assert_look_up_returns(&temp_dir, 6700, "06000.log", 0);
+    assert_look_up_returns(&temp_dir, 7500, "06000.log", 7);
+    assert_look_up_returns(&temp_dir, 8800, "08500.log", 0);
 }
 
 fn assert_look_up_returns(temp_dir: &TempTestDir, index: u64, expected_log_file: &str, expected_byte_offset: u64) {

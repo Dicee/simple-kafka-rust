@@ -3,7 +3,7 @@ use std::fs;
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
-use assertor::{assert_that, VecAssertion};
+use assertor::{assert_that, EqualityAssertion, VecAssertion};
 use walkdir::WalkDir;
 
 /// Simplifies the creation, management and state assertions for temporary directories specifically used in tests.
@@ -99,7 +99,8 @@ impl Drop for TempTestDir {
 }
 
 pub fn assert_file_has_content(path: &str, content: &str) {
-    assert_eq!(read_to_string(path).unwrap_or_else(|_| panic!("Failed to read content as string for path {path}")), content)
+    assert_that!(read_to_string(path).unwrap_or_else(|_| panic!("Failed to read content as string for path {path}")))
+        .is_equal_to(content.to_owned())
 }
 
 fn get_unit_tests_dir() -> String {

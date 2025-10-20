@@ -1,5 +1,5 @@
 use super::append_only_log::{AppendOnlyLog, LogFile};
-use crate::persistence::LOG_EXTENSION;
+use crate::persistence::{INDEX_EXTENSION, LOG_EXTENSION};
 use mockall::automock;
 use std::ffi::OsStr;
 use std::fs::File;
@@ -28,23 +28,25 @@ mod indexing_test;
 /// We want to have roughly logarithmic (in the number of records) access to a record, so roughly 10 disk seeks to find the base offset of the batch.
 /// To achieve that, we need to index every 20 batches, namely every 1000 records.
 const MAX_INDEX_GAP: u64 = 1000;
-const INDEX_EXTENSION: &str = "index";
 
 #[automock]
-pub trait LogIndexWriter {
+pub trait LogIndexWriter : Send {
     /// Notifies the index writer that a new record has been written with a given index, at a given byte offset. The [LogIndexWriter] will decide
     /// whether to write a new index entry or not.
     /// # Panicking
     /// The index must be greater than the last written index.
     fn ack_bytes_written(&mut self, index: u64, byte_offset: u64) -> io::Result<()>;
 
-    /// Notifies the index writer that a rotation occurred for the log file, and provides the new path for the writer to update its internal state.
-    /// This function mainly exists for mocking, otherwise the [RotatingAppendOnlyLog] could have instantiated a new [LogIndexWriter]. With this method,
+    /// Notifies the index writer that a rotation occurred for the log file, and provides the cutoff index and final byte offset before rotation
+    /// to update its internal state. The cutoff index is the first index that will be written to the next log file. The cutoff index will be written
+    /// at the end of the current index file before rotating it, which is useful for the [LogReader] to determine the next file's name by looking at the
+    /// current file's index (last 16 bytes only). The writer doesn't need that because it receives the index as an input, but the reader doesn't get any hint.
+    /// This function also exists for mocking, otherwise the [RotatingAppendOnlyLog] could have instantiated a new [LogIndexWriter]. With this method,
     /// we can reuse the same instance in-place and facilitate mocking it.
     /// # Panicking
     /// Note that the file's name must be composed of a [u64] index (first index in the file) and an optional extension. The function will panic if
     /// this condition is not met as the index cannot work properly without it. Additionally, the index must be greater than the last written index.
-    fn ack_rotation(&mut self, new_path: &Path) -> io::Result<()>;
+    fn ack_rotation(&mut self, cut_off_index: u64, last_byte_offset: u64) -> io::Result<()>;
 
     /// Flushes the content of the internal buffer to the disk. It is recommended to always flush after flushing the record writer's buffer,
     /// in order to properly "commit" the records written so far as long with their index, though not strictly required (logs would remain
@@ -52,7 +54,8 @@ pub trait LogIndexWriter {
     fn flush(&mut self) -> io::Result<()>;
 }
 
-struct BinaryLogIndexWriter {
+pub struct BinaryLogIndexWriter {
+    root_path: PathBuf,
     index_file: AppendOnlyLog,
     last_written_index: u64,
     max_index_gap: u64,
@@ -65,35 +68,32 @@ impl BinaryLogIndexWriter {
     /// Note that the file's name must be composed of a [u64] index (first index in the file) and an optional extension. The function will panic if
     /// this condition is not met as the index cannot work properly without it.
     pub fn open_for_log_file(path: &Path) -> io::Result<Self> {
+        let root_path = path.parent().unwrap_or(Path::new("")).to_owned();
         let (_, index_file_path) = log_path_to_index_path(path);
         let index_file = AppendOnlyLog::open(&index_file_path)?; // ensures the index file now exists
-        let index = Self::extract_last_index(&index_file_path)?;
+        let index = extract_last_index(&index_file_path)?;
 
         Ok(Self {
+            root_path,
             index_file,
-            last_written_index: index,
+            last_written_index: index.unwrap_or(0),
             max_index_gap: MAX_INDEX_GAP,
         })
     }
 
-    fn extract_last_index(index_file_path: &Path) -> io::Result<u64> {
-        let file_len = fs::metadata(index_file_path)?.len();
-        if file_len == 0 { return Ok(0); }
-
-        let mut reader = BufReader::new(File::open(index_file_path)?);
-
-        // -16 to account for two u64 values
-        reader.seek(io::SeekFrom::Start(file_len - 16))?;
-        let mut buf = [0_u8; 8];
-        reader.read_exact(&mut buf)?;
-
-        Ok(u64::from_le_bytes(buf))
+    fn force_ack_bytes_written(&mut self, index: u64, byte_offset: u64) -> io::Result<()> {
+        Ok({
+            self.index_file.write_all(&index.to_le_bytes())?;
+            self.index_file.write_all(&byte_offset.to_le_bytes())?;
+            self.last_written_index = index;
+        })
     }
 
-    fn validate_index(&mut self, index: u64) {
-        if index <= self.last_written_index {
+    fn validate_index(&mut self, index: u64) -> u64 {
+        if index > 0 && index <= self.last_written_index {
             panic!("Indices must monotonically increase, but tried to write {index} while the last written index is {}", self.last_written_index);
         }
+        index
     }
 }
 
@@ -102,25 +102,30 @@ impl LogIndexWriter for BinaryLogIndexWriter {
         self.validate_index(index);
 
         if index - self.last_written_index >= self.max_index_gap {
-            self.index_file.write_all(&index.to_le_bytes())?;
-            self.index_file.write_all(&byte_offset.to_le_bytes())?;
-            self.last_written_index = index;
+            self.force_ack_bytes_written(index, byte_offset)?;
         }
         Ok(())
     }
 
-    fn ack_rotation(&mut self, new_path: &Path) -> io::Result<()> {
+    fn ack_rotation(&mut self, cut_off_index: u64, last_byte_offset: u64) -> io::Result<()> {
+        self.validate_index(cut_off_index);
+
+        if cut_off_index != self.last_written_index {
+            // Helpful for the LogReader, see the doc on the trait. Note that the cutoff index is actually outside of this file, but we
+            // still write it at the end. This is not an issue because the lookup function will select the next file when searching for
+            // this index, so this footer will never be an issue as no value greater than cut_off_index - 1 will ever be searched in the
+            // current index file
+            self.force_ack_bytes_written(cut_off_index, last_byte_offset)?;
+        }
         self.flush()?;
 
-        let (first_index, new_index_file_path) = log_path_to_index_path(new_path);
+        let new_index_file_path = self.root_path.clone().join(super::get_index_name(cut_off_index));
         let new_index_file = AppendOnlyLog::open(&new_index_file_path)?; // ensures the index file now exists
 
-        self.index_file = new_index_file;
-
-        self.validate_index(first_index);
         // we expect indices to be monotonically increasing, and we still want to write the next index with a large enough gap from the start
         // of this file (it's useless to write a row for the first record of the file)
-        self.last_written_index = first_index;
+        self.last_written_index = cut_off_index - 1; // in the current file indices end just before the cutoff
+        self.index_file = new_index_file;
 
         Ok(())
     }
@@ -149,18 +154,6 @@ pub struct IndexLookupResult {
 /// returned if no data has been written yet.
 pub fn look_up(root_path: &Path, index: u64) -> io::Result<Option<IndexLookupResult>> {
     let mut index_files = Vec::new();
-
-    // not super elegant compared to using iterator methods, but it makes handling the many layers of Result nicely
-    // for entry in fs::read_dir(root_path)? {
-    //     let entry = entry?;
-    //     let path = entry.path();
-    //     let is_file = entry.file_type()?.is_file();
-    //     let extension = path.extension().map(|os_str| os_str.to_str().unwrap()).unwrap_or("");
-    //     if is_file && extension == LOG_EXTENSION {
-    //         let (start_index, _) = log_path_to_index_path(&path);
-    //         index_files.push((start_index, path.to_owned()));
-    //     }
-    // }
 
     WalkDir::new(&root_path)
         .sort_by_file_name()
@@ -220,6 +213,36 @@ fn parse_index_file(log_file_path: &Path) -> io::Result<Vec<(u64, u64)>> {
     }
 
     Ok(rows)
+}
+
+/// This function determines what the path of the next log file path should be if the provided log file is at eof. If the generated next file
+/// path doesn't exist, it means rotation has not happened yet and the reader should continue polling for new data on the current log file.
+/// In this case, [None] is returned. If the next log file exists, its path is returned.
+pub fn get_next_log_file_path(log_file_path: &Path) -> io::Result<Option<PathBuf>> {
+    let root_path = log_file_path.parent().unwrap_or(Path::new("")).to_owned();
+    Ok(match extract_last_index(&log_path_to_index_path(&log_file_path).1)? {
+        None => None,
+        Some(last_index) => {
+            let next_log_file_path = root_path.join(super::get_log_name(last_index));
+            if next_log_file_path.exists() { Some(next_log_file_path) } else { None }
+        }
+    })
+}
+
+fn extract_last_index(index_file_path: &Path) -> io::Result<Option<u64>> {
+    if !fs::exists(&index_file_path)? { return Ok(None) }
+
+    let file_len = fs::metadata(index_file_path)?.len();
+    if file_len == 0 { return Ok(None); }
+
+    let mut reader = BufReader::new(File::open(index_file_path)?);
+
+    // -16 to account for two u64 values
+    reader.seek(io::SeekFrom::Start(file_len - 16))?;
+    let mut buf = [0_u8; 8];
+    reader.read_exact(&mut buf)?;
+
+    Ok(Some(u64::from_le_bytes(buf)))
 }
 
 fn log_path_to_index_path(log_path: &Path) -> (u64, PathBuf) {

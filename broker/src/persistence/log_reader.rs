@@ -1,5 +1,4 @@
-use crate::persistence::append_only_log::RotatingAppendOnlyLog;
-use std::fs;
+use crate::persistence::indexing;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -47,24 +46,15 @@ impl LogReader {
 /// However, this is very tricky to do since there can be multiple readers from different consumer groups, and they're not necessarily up to speed with
 /// the producer. With this assumption we're making, we can make the read rotation logic simple, and performance shouldn't suffer.
 pub struct RotatingLogReader {
-    root_path: String,
-    base_file_name: &'static str,
-    next_file_name: PathBuf,
-    log_index: u32,
+    log_path: PathBuf,
     log_reader: LogReader,
 }
 
 impl RotatingLogReader {
-    pub fn open(root_path: String, base_file_name: &'static str, log_index: u32) -> io::Result<Self> {
-        let file_name = RotatingAppendOnlyLog::get_log_name(&root_path, base_file_name, log_index);
-        let next_file_name = RotatingAppendOnlyLog::get_log_name(&root_path, base_file_name, log_index + 1);
-        Ok(Self {
-            root_path,
-            base_file_name,
-            next_file_name,
-            log_index,
-            log_reader: LogReader::open(&file_name)?,
-        })
+    pub fn open(root_path: String, index: u64) -> io::Result<Self> {
+        let log_path = super::get_log_path(&root_path, index);
+        let log_reader = LogReader::open(&log_path)?;
+        Ok(Self { log_path, log_reader })
     }
 
     /// Seeks [LogReader]. Note that this method won't trigger any rotation,only reading data will do that.
@@ -76,20 +66,13 @@ impl RotatingLogReader {
     /// exists yet. The data may be from the current file or the next one, as this method can trigger a rotation.
     pub fn read(&mut self, len: usize) -> io::Result<Vec<u8>> {
         if self.log_reader.is_eof()? {
-            return if fs::exists(&self.next_file_name)? {
-                let next_file_name = self.get_next_file_name();
-                self.log_reader = LogReader::open(&next_file_name)?;
-                self.log_index += 1;
-                self.next_file_name = next_file_name;
+            return if let Some(next_file_path) = indexing::get_next_log_file_path(&self.log_path)? {
+                self.log_reader = LogReader::open(&next_file_path)?;
                 self.read(len)
             } else {
                 Ok(vec![])
             }
         }
         self.log_reader.read_exact(len)
-    }
-
-    fn get_next_file_name(&self) -> PathBuf {
-        RotatingAppendOnlyLog::get_log_name(&self.root_path, self.base_file_name, self.log_index + 1)
     }
 }

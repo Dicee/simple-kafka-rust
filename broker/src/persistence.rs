@@ -15,10 +15,12 @@ use std::sync::{atomic, Arc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use std::{io, iter, thread};
+use std::path::PathBuf;
 use tokio::sync::oneshot;
 
 const LOG_EXTENSION: &str = "log";
-const BASE_FILE_NAME: &'static str = "data";
+const INDEX_EXTENSION: &str = "index";
+
 // 10 MB to make it interesting to watch on low-scale examples, but of course not optimized for larger scale
 const MAX_FILE_SIZE_BYTES: u64 = 10 * 1024 * 1024;
 // We don't need to shut down very fast, so we can afford having a slow loop, and it saves CPU cycles. Note
@@ -69,8 +71,8 @@ impl LogManager {
     /// - [WriteError::Io] if an IO error occurs during the write operation
     /// - [WriteError::WriterThreadDisconnected] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    pub fn write(&mut self, topic: &str, partition: u32, buf: &[u8]) -> Result<(), WriteError> {
-        self.get_or_create_partition_manager(topic, partition, |e| WriteError::Io(e))?.write(buf, false)
+    pub fn write(&mut self, topic: &str, partition: u32, index: u64, buf: &[u8]) -> Result<(), WriteError> {
+        self.get_or_create_partition_manager(topic, partition, |e| WriteError::Io(e))?.write(index, buf, false)
     }
 
     /// Same as [Self::write] but it additionally flushes the data written so far.
@@ -78,8 +80,8 @@ impl LogManager {
     /// - [WriteError::Io] if an IO error occurs during the write operation
     /// - [WriteError::WriterThreadDisconnected] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    pub fn write_and_commit(&mut self, topic: &str, partition: u32, buf: &[u8]) -> Result<(), WriteError> {
-        self.get_or_create_partition_manager(topic, partition, |e| WriteError::Io(e))?.write(buf, true)
+    pub fn write_and_commit(&mut self, topic: &str, partition: u32, index: u64, buf: &[u8]) -> Result<(), WriteError> {
+        self.get_or_create_partition_manager(topic, partition, |e| WriteError::Io(e))?.write(index, buf, true)
     }
 
     /// Seeks the log file for a given topic, partition and consumer group by the requested amount of bytes from its current position. Caution,
@@ -164,7 +166,7 @@ impl PartitionLogManager {
         let (writer_tx, writer_rx) = std::sync::mpsc::channel();
 
         let mut writer = PartitionLogWriter {
-            log: RotatingAppendOnlyLog::open_latest(partition_root_path.clone(), BASE_FILE_NAME, MAX_FILE_SIZE_BYTES)?,
+            log: RotatingAppendOnlyLog::open_latest(partition_root_path.clone(), MAX_FILE_SIZE_BYTES)?,
             write_requests: writer_rx,
             shutdown: Arc::clone(&shutdown),
         };
@@ -188,10 +190,10 @@ impl PartitionLogManager {
     /// - [WriteError::Io] if an IO error occurs during the write operation
     /// - [WriteError::WriterThreadDisconnected] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    fn write(&self, bytes: &[u8], flush: bool) -> Result<(), WriteError> {
+    fn write(&self, index: u64, bytes: &[u8], flush: bool) -> Result<(), WriteError> {
         let (response_tx, response_rx) = oneshot::channel();
 
-        let send_result = self.writer_tx.send(WriteRequest { bytes: Arc::from(bytes), flush, response_tx });
+        let send_result = self.writer_tx.send(WriteRequest { index, bytes: Arc::from(bytes), flush, response_tx });
         if send_result.is_err() { return Err(WriteError::WriterThreadDisconnected) }
 
         response_rx.blocking_recv().unwrap_or_else(|_| Err(WriteError::WriterThreadDisconnected))
@@ -230,7 +232,7 @@ impl PartitionLogManager {
                 let (reader_tx, reader_rx) = std::sync::mpsc::channel();
                 let mut reader = PartitionLogReader {
                     // we don't support lookup by offset yet so we always start from the beginning of the first file
-                    reader: RotatingLogReader::open(self.root_path.clone(), BASE_FILE_NAME, 0).map_err(|e| ReadError::Io(e))?,
+                    reader: RotatingLogReader::open(self.root_path.clone(), 0).map_err(|e| ReadError::Io(e))?,
                     read_requests: reader_rx,
                     shutdown: Arc::clone(&self.shutdown),
                 };
@@ -268,6 +270,7 @@ trait MpscRequest<Res, Err> {
 }
 
 struct WriteRequest {
+    index: u64,
     bytes: Arc<[u8]>,
     flush: bool,
     response_tx: oneshot::Sender<Result<(), WriteError>>,
@@ -289,8 +292,8 @@ struct PartitionLogWriter {
 impl PartitionLogWriter {
     fn start_write_loop(&mut self, loop_timeout: Duration, description: String) {
         start_mpsc_request_loop(&self.write_requests, |request| {
-            let mut result = self.log.write_all(&request.bytes);
-            if result.is_ok() && request.flush  { result = self.log.flush() }
+            let mut result = self.log.write_all(request.index, &request.bytes);
+            if result.is_ok() && request.flush { result = self.log.flush() }
             result.map_err(|e| WriteError::Io(e))
         }, loop_timeout, &self.shutdown, description);
     }
@@ -372,4 +375,16 @@ fn start_mpsc_request_loop<Req, Res, Err, F>(
             _ => {},
         }
     }
+}
+
+fn get_log_path(root_path: &str, first_index: u64) -> PathBuf {
+    PathBuf::from(root_path).join(get_log_name(first_index))
+}
+
+fn get_log_name(first_index: u64) -> String {
+    format!("{first_index:05}.{LOG_EXTENSION}")
+}
+
+fn get_index_name(first_index: u64) -> String {
+    format!("{first_index:05}.{INDEX_EXTENSION}")
 }

@@ -2,8 +2,8 @@ use crate::persistence::log_reader::{LogReader, RotatingLogReader};
 use assertor::{assert_that, EqualityAssertion};
 use file_test_utils::{TempTestDir, TempTestFile};
 use std::{fs, io};
-
-const BASE_FILE_NAME: &'static str = "data";
+use crate::persistence::get_log_path;
+use crate::persistence::indexing::{BinaryLogIndexWriter, LogIndexWriter};
 
 #[test]
 fn test_log_reader_open_and_read_until_eof() {
@@ -36,9 +36,9 @@ fn test_rotating_log_reader_open_and_read_until_and_past_eof() {
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     fs::create_dir_all(root_path.clone()).unwrap();
-    write_to_file(&root_path, "data.00003", "hello world! Nice to meet you!");
+    write_to_file(&root_path, "00003.log", "hello world! Nice to meet you!");
 
-    let mut log_reader = RotatingLogReader::open(root_path, BASE_FILE_NAME, 3).unwrap();
+    let mut log_reader = RotatingLogReader::open(root_path, 3).unwrap();
 
     assert_read_bytes_are(log_reader.read(12), "hello world!");
     assert_read_bytes_are(log_reader.read(1), " ");
@@ -52,12 +52,15 @@ fn test_rotating_log_reader_open_and_read_until_and_past_eof() {
 fn test_rotating_log_reader_moves_to_next_file() {
     let temp_dir = TempTestDir::create();
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
-
     fs::create_dir_all(root_path.clone()).unwrap();
-    write_to_file(&root_path, "data.00003", "hello world! Nice to meet you!");
-    write_to_file(&root_path, "data.00004", "It's beautiful around here!");
 
-    let mut log_reader = RotatingLogReader::open(root_path, BASE_FILE_NAME, 3).unwrap();
+    let content1 = "hello world! Nice to meet you!";
+    write_to_file(&root_path, "00003.log", content1);
+    write_to_file(&root_path, "00004.log", "It's beautiful around here!");
+
+    ensure_index_file_contains_reference_to_next(&root_path, 3, content1.len() as u64);
+
+    let mut log_reader = RotatingLogReader::open(root_path, 3).unwrap();
     assert_read_bytes_are(log_reader.read(12), "hello world!");
     assert_read_bytes_are(log_reader.read(18), " Nice to meet you!");
     assert_read_bytes_are(log_reader.read(15), "It's beautiful ");
@@ -70,9 +73,9 @@ fn test_rotating_log_reader_seek_back_and_forth() {
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     fs::create_dir_all(root_path.clone()).unwrap();
-    write_to_file(&root_path, "data.00003", "hello world! Nice to meet you!");
+    write_to_file(&root_path, "00003.log", "hello world! Nice to meet you!");
 
-    let mut log_reader = RotatingLogReader::open(root_path, BASE_FILE_NAME, 3).unwrap();
+    let mut log_reader = RotatingLogReader::open(root_path, 3).unwrap();
     assert_read_bytes_are(log_reader.read(12), "hello world!");
 
     log_reader.seek(6).unwrap();
@@ -88,10 +91,13 @@ fn test_rotating_log_reader_seek_to_eof_and_rotate() {
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     fs::create_dir_all(root_path.clone()).unwrap();
-    write_to_file(&root_path, "data.00003", "hello world! Nice to meet you!");
-    write_to_file(&root_path, "data.00004", "It's beautiful around here!");
+    let content1 = "hello world! Nice to meet you!";
+    write_to_file(&root_path, "00003.log", content1);
+    write_to_file(&root_path, "00004.log", "It's beautiful around here!");
 
-    let mut log_reader = RotatingLogReader::open(root_path, BASE_FILE_NAME, 3).unwrap();
+    ensure_index_file_contains_reference_to_next(&root_path, 3, content1.len() as u64);
+
+    let mut log_reader = RotatingLogReader::open(root_path, 3).unwrap();
 
     assert_read_bytes_are(log_reader.read(12), "hello world!");
 
@@ -106,18 +112,23 @@ fn test_rotating_log_reader_negative_seek_beyond_file_start() {
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     fs::create_dir_all(root_path.clone()).unwrap();
-    write_to_file(&root_path, "data.00003", "hello world! Nice to meet you!");
+    write_to_file(&root_path, "00003.log", "hello world! Nice to meet you!");
 
-    let mut log_reader = RotatingLogReader::open(root_path, BASE_FILE_NAME, 3).unwrap();
+    let mut log_reader = RotatingLogReader::open(root_path, 3).unwrap();
 
     log_reader.seek(-1).unwrap();
+}
+
+fn write_to_file(root_path: &String, file_name: &str, content: &str) {
+    fs::write(&format!("{root_path}{file_name}"), content).unwrap();
+}
+
+fn ensure_index_file_contains_reference_to_next(root_path: &str, index: u64, final_byte_offset: u64) {
+    BinaryLogIndexWriter::open_for_log_file(&get_log_path(&root_path, index)).unwrap()
+        .ack_rotation(index + 1, final_byte_offset).unwrap();
 }
 
 fn assert_read_bytes_are(result: io::Result<Vec<u8>>, expected: &str) {
     let actual: &str = &String::from_utf8(result.unwrap()).unwrap();
     assert_that!(actual).is_equal_to(expected);
-}
-
-fn write_to_file(root_path: &String, file_name: &str, content: &str) {
-    fs::write(&format!("{root_path}{file_name}"), content).unwrap();
 }

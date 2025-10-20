@@ -44,9 +44,9 @@ fn test_read_seek_and_write_to_several_topics_and_shutdown() {
     log_manager.shutdown().unwrap();
 
     // an extra check just to test the layout of the files
-    assert_file_has_content(&format!("{}/topic1/partition=0000/data.00000", root_path), "Hi sir! How are you on this fine morning?");
-    assert_file_has_content(&format!("{}/topic1/partition=0001/data.00000", root_path), "We're not quite as polite in this partition so get lost.");
-    assert_file_has_content(&format!("{}/topic2/partition=0128/data.00000", root_path), "Here we are civilized, sir. We do greet our guests");
+    assert_file_has_content(&format!("{}/topic1/partition=0000/00000.log", root_path), "Hi sir! How are you on this fine morning?");
+    assert_file_has_content(&format!("{}/topic1/partition=0001/00000.log", root_path), "We're not quite as polite in this partition so get lost.");
+    assert_file_has_content(&format!("{}/topic2/partition=0128/00000.log", root_path), "Here we are civilized, sir. We do greet our guests");
 }
 
 #[test]
@@ -56,10 +56,10 @@ fn test_write_without_flushing() {
 
     let mut log_manager = LogManager::new_with_loop_timeout(root_path.clone(), DEFAULT_LOOP_TIMEOUT);
 
-    log_manager.write("topic1", 0, b"Hi").unwrap();
+    log_manager.write("topic1", 0, 0, b"Hi").unwrap();
     assert_read_bytes_are(log_manager.read("topic1", 0, GROUP1.to_owned(), 2), "");
 
-    log_manager.write_and_commit("topic1", 0, b" boyz").unwrap();
+    log_manager.write_and_commit("topic1", 0, 1, b" boyz").unwrap();
     assert_read_bytes_are(log_manager.read("topic1", 0, GROUP1.to_owned(), 7), "Hi boyz");
 
     log_manager.shutdown().unwrap();
@@ -111,7 +111,7 @@ fn test_read_past_eof() {
 }
 
 fn write_to(log_manager: &mut LogManager, topic: &str, partition: u32, content: &str) {
-    log_manager.write_and_commit(topic, partition, content.as_bytes()).unwrap();
+    log_manager.write_and_commit(topic, partition, 0, content.as_bytes()).unwrap();
 }
 
 fn assert_read_bytes_are(result: Result<Vec<u8>, ReadError>, expected: &str) {
