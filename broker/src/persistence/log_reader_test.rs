@@ -3,7 +3,7 @@ use assertor::{assert_that, EqualityAssertion};
 use file_test_utils::{TempTestDir, TempTestFile};
 use std::{fs, io};
 use crate::persistence::get_log_path;
-use crate::persistence::indexing::{BinaryLogIndexWriter, LogIndexWriter};
+use crate::persistence::indexing::{LogIndexWriter};
 
 #[test]
 fn test_log_reader_open_and_read_until_eof() {
@@ -124,7 +124,7 @@ fn write_to_file(root_path: &String, file_name: &str, content: &str) {
 }
 
 fn ensure_index_file_contains_reference_to_next(root_path: &str, index: u64, final_byte_offset: u64) {
-    BinaryLogIndexWriter::open_for_log_file(&get_log_path(&root_path, index)).unwrap()
+    LogIndexWriter::open_for_log_file(&get_log_path(&root_path, index)).unwrap()
         .ack_rotation(index + 1, final_byte_offset).unwrap();
 }
 

@@ -184,7 +184,46 @@ fn assert_look_up_returns(temp_dir: &TempTestDir, index: u64, expected_log_file:
     }));
 }
 
-fn new_index_writer(temp_dir: &TempTestDir, log_file_path: &str) -> BinaryLogIndexWriter {
-    let index_writer = BinaryLogIndexWriter::open_for_log_file(&temp_dir.resolve(log_file_path)).unwrap();
-    index_writer
+#[test]
+fn test_get_next_log_file_path_no_index() {
+    let temp_dir = TempTestDir::create();
+    assert_that!(get_next_log_file_path(&temp_dir.resolve("00000.log"))).has_ok(None);
+}
+
+
+#[test]
+fn test_get_next_log_file_path_empty_index() {
+    let temp_dir = TempTestDir::create();
+    fs::write(&temp_dir.resolve("00000.index"), "").unwrap();
+
+    assert_that!(get_next_log_file_path(&temp_dir.resolve("00000.log"))).has_ok(None);
+}
+
+#[test]
+fn test_get_next_log_file_path_no_next_log_file() {
+    let temp_dir = TempTestDir::create();
+
+    let mut index_writer = new_index_writer(&temp_dir, "00000.log");
+    index_writer.ack_bytes_written(MAX_INDEX_GAP, 10).unwrap();
+    index_writer.flush().unwrap();
+
+    assert_that!(get_next_log_file_path(&temp_dir.resolve("00000.log"))).has_ok(None);
+}
+
+#[test]
+fn test_get_next_log_file_path_next_log_file_exists() {
+    let temp_dir = TempTestDir::create();
+
+    let mut index_writer = new_index_writer(&temp_dir, "00000.log");
+    index_writer.ack_bytes_written(MAX_INDEX_GAP + 15, 10).unwrap();
+    index_writer.flush().unwrap();
+
+    let next_log_file_path = temp_dir.resolve("01015.log");
+    fs::write(&next_log_file_path, "").unwrap();
+
+    assert_that!(get_next_log_file_path(&temp_dir.resolve("00000.log"))).has_ok(Some(next_log_file_path));
+}
+
+fn new_index_writer(temp_dir: &TempTestDir, log_file_name: &str) -> LogIndexWriter {
+    LogIndexWriter::open_for_log_file(&temp_dir.resolve(log_file_name)).unwrap()
 }

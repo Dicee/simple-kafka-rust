@@ -1,12 +1,11 @@
-use super::{AppendOnlyLog, LogFile, RotatingAppendOnlyLog};
+use super::{AppendOnlyLog,  RotatingAppendOnlyLog};
 use file_test_utils::{assert_file_has_content, TempTestDir, TempTestFile};
 use std::fs;
 use std::path::Path;
-use mockall::predicate;
-use crate::persistence::{get_log_path, MAX_FILE_SIZE_BYTES};
-use crate::persistence::indexing::MockLogIndexWriter;
+use assertor::{assert_that, ResultAssertion};
+use crate::persistence::get_log_path;
+use crate::persistence::indexing::{LogIndexWriter, parse_index_file};
 
-const BASE_FILE_NAME: &'static str = "data";
 const DEFAULT_MAX_BYTES: u64 = 30; // can fit two "Hello world!" but not more
 
 #[test]
@@ -157,7 +156,15 @@ fn test_rotate() {
     let temp_dir = TempTestDir::create();
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
-    let mut log = new_rotated_log(root_path.clone());
+    let log_path = get_log_path(&root_path, 0);
+    let mut log = RotatingAppendOnlyLog {
+        root_path: root_path.clone(),
+        log: AppendOnlyLog::open(&log_path).unwrap(),
+        max_byte_size: DEFAULT_MAX_BYTES,
+        current_byte_size: 0,
+        // opening with a gap of 0 to record every single index
+        index_writer: LogIndexWriter::open_with_config(&log_path, 0).unwrap(),
+    };
 
     let content = "Hello world!";
     log.write_all(0, content.as_bytes()).unwrap();
@@ -181,6 +188,10 @@ fn test_rotate() {
 
     log.flush().unwrap();
     assert_file_has_content(&format!("{}00004.log", &root_path), "Hello world!");
+
+    assert_that!(parse_index_file(&temp_dir.resolve("my-topic/partition=12/00000.index"))).has_ok(vec![(0, 0), (1, 12), (2, 24)]);
+    assert_that!(parse_index_file(&temp_dir.resolve("my-topic/partition=12/00002.index"))).has_ok(vec![(2, 0), (3, 12), (4, 24)]);
+    assert_that!(parse_index_file(&temp_dir.resolve("my-topic/partition=12/00004.index"))).has_ok(vec![(4, 0)]);
 }
 
 #[test]

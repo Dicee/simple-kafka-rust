@@ -1,21 +1,15 @@
+use crate::persistence::indexing::LogIndexWriter;
+use crate::persistence::LOG_EXTENSION;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use walkdir::WalkDir;
-use crate::persistence::indexing::{BinaryLogIndexWriter, LogIndexWriter};
-use crate::persistence::LOG_EXTENSION;
 
 #[cfg(test)]
 #[path="append_only_log_test.rs"]
 mod append_only_log_test;
-
-pub trait LogFile {
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()>;
-
-    fn flush(&mut self) -> io::Result<()>;
-}
 
 /// Simplistic implementation of an append-only log. It must be written to by a single thread at a time.
 pub struct AppendOnlyLog {
@@ -64,7 +58,7 @@ pub struct RotatingAppendOnlyLog {
     max_byte_size: u64,
     current_byte_size: u64,
     log: AppendOnlyLog,
-    index_writer: Box<dyn LogIndexWriter>,
+    index_writer: LogIndexWriter,
 }
 
 // Note that we won't implement drop manually because the default implementation should be correct, since AppendOnlyLog itself implements Drop
@@ -113,14 +107,12 @@ impl RotatingAppendOnlyLog {
             len = fs::metadata(&log_path)?.len();
         }
 
-        let log = AppendOnlyLog::open(&log_path)?;
-        let index_writer = BinaryLogIndexWriter::open_for_log_file(&log_path)?;
         Ok(RotatingAppendOnlyLog {
             root_path,
             max_byte_size,
             current_byte_size: len,
-            log,
-            index_writer: Box::new(index_writer),
+            log: AppendOnlyLog::open(&log_path)?,
+            index_writer: LogIndexWriter::open_for_log_file(&log_path)?,
         })
     }
 
