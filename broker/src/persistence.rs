@@ -16,6 +16,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use std::{io, iter, thread};
 use std::path::PathBuf;
+use mockall::automock;
 use tokio::sync::oneshot;
 
 const LOG_EXTENSION: &str = "log";
@@ -84,32 +85,14 @@ impl LogManager {
         self.get_or_create_partition_manager(topic, partition, |e| WriteError::Io(e))?.write(index, buf, true)
     }
 
-    /// Seeks the log file for a given topic, partition and consumer group by the requested amount of bytes from its current position. Caution,
-    /// this only works within a single file, if the offset exceeds the file size, the cursor won't overflow to the next file and will stay at
-    /// the EOF of the current one.
-    /// # Errors
-    /// - [ReadError::Io] if an IO error occurs during the seek operation
-    /// - [ReadError::ReaderThreadDisconnected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
-    ///   is likely required.
-    pub fn seek(&mut self, topic: &str, partition: u32, consumer_group: String, byte_offset: i64) -> Result<(), ReadError> {
-        self.get_or_create_partition_manager(topic, partition, |e| ReadError::Io(e))?.seek(consumer_group, byte_offset)
-    }
-
-    /// Reads the request amount of bytes from the current position for a given topic, partition and consumer group. Caution, this only works within a single
-    /// file, if the requested length exceeds the file size, this method will fail **except** if the cursor is exactly at EOF, in which case either one of two
-    /// things will happen:
-    /// - if the next file already exists, rotation will take place automatically and the bytes will be read from the next file. In this case, the number of
-    ///   bytes in the next file must still be equal or larger than the requested number of bytes.
-    /// - if the next file doesn't exist, this method will return an empty vector to signal that there is no new data to be read at the moment.
-    ///
-    /// In short, reads with this method need to perfectly align with EOF for the current file (either not intersect EOF, or end exactly at EOF, or start
-    /// exactly at EOF).
+    /// Atomically performs arbitrary read operations specified by the [AtomicReadAction] with the guarantee that no other threads will be able to interleave 
+    /// any read operation to the same [RotatingLogReader] as long as this action is running.
     /// # Errors
     /// - [ReadError::Io] if an IO error occurs during the read operation
     /// - [ReadError::ReaderThreadDisconnected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    pub fn read(&mut self, topic: &str, partition: u32, consumer_group: String, len: usize) -> Result<Vec<u8>, ReadError> {
-        self.get_or_create_partition_manager(topic, partition, |e| ReadError::Io(e))?.read(consumer_group, len)
+    pub fn atomic_read(&mut self, topic: &str, partition: u32, consumer_group: String, atomic_read: impl AtomicReadAction) -> Result<Vec<u8>, ReadError> {
+        self.get_or_create_partition_manager(topic, partition, |e| ReadError::Io(e))?.atomic_read(consumer_group, atomic_read)
     }
 
     fn get_or_create_partition_manager<F, Err>(&mut self, topic: &str, partition: u32, map_error: F) -> Result<&mut PartitionLogManager, Err>
@@ -199,33 +182,14 @@ impl PartitionLogManager {
         response_rx.blocking_recv().unwrap_or_else(|_| Err(WriteError::WriterThreadDisconnected))
     }
 
-    /// Seeks by a given byte offset in the log file for the given consumer.
-    /// # Errors
-    /// - [ReadError::Io] if an IO error occurs during the seek operation
-    /// - [ReadError::ReaderThreadDisconnected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
-    ///   is likely required.
-    fn seek(&mut self, consumer_group: String, byte_offset: i64) -> Result<(), ReadError> {
-        self.handle_read_request(consumer_group, ReadAction::Seek(byte_offset), |result| result.map(|response| match response {
-            ReadResponse::SuccessfulRead(_) => panic!("Unexpected response SuccessfulRead when the request was a Seek"),
-            ReadResponse::SuccessfulSeek => (),
-        }))
-    }
-
-    /// Reads the request amount of bytes from the current offset for the given consumer.
+    /// Atomically performs arbitrary read operations specified by the [AtomicReadAction] with the guarantee that no other threads will be able to interleave 
+    /// any read operation to the same [RotatingLogReader] as long as this action is running.
     /// # Errors
     /// - [ReadError::Io] if an IO error occurs during the read operation
     /// - [ReadError::ReaderThreadDisconnected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    fn read(&mut self, consumer_group: String, len: usize) -> Result<Vec<u8>, ReadError> {
-        self.handle_read_request(consumer_group, ReadAction::Read(len), |result| result.map(|response| match response {
-            ReadResponse::SuccessfulSeek => panic!("Unexpected response SuccessfulSeek when the request was a Read"),
-            ReadResponse::SuccessfulRead(bytes) => bytes,
-        }))
-    }
-
-    fn handle_read_request<T, F>(&mut self, consumer_group: String, action: ReadAction, map_result: F) -> Result<T, ReadError>
-    where F: FnOnce(Result<ReadResponse, ReadError>) -> Result<T, ReadError>
-    {
+    fn atomic_read(&mut self, consumer_group: String, atomic_action: impl AtomicReadAction) -> Result<Vec<u8>, ReadError> {
+        let atomic_action = Box::new(atomic_action);
         let consumer_manager = match self.consumers.entry(consumer_group.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
@@ -245,13 +209,10 @@ impl PartitionLogManager {
         };
 
         let (response_tx, response_rx) = oneshot::channel();
-        let send_result = consumer_manager.reader_tx.send(ReadRequest { action, response_tx });
+        let send_result = consumer_manager.reader_tx.send(ReadRequest { atomic_action, response_tx });
         if send_result.is_err() { return Err(ReadError::ReaderThreadDisconnected) }
 
-        match response_rx.blocking_recv() {
-            Ok(result) => map_result(result),
-            Err(_) => Err(ReadError::ReaderThreadDisconnected),
-        }
+        response_rx.blocking_recv().unwrap_or_else(|_| Err(ReadError::ReaderThreadDisconnected))
     }
 
     fn shutdown(self) -> thread::Result<()> {
@@ -304,18 +265,19 @@ impl MpscRequest<(), WriteError> for WriteRequest {
 }
 
 struct ReadRequest {
-    action: ReadAction,
-    response_tx: oneshot::Sender<Result<ReadResponse, ReadError>>,
+    atomic_action: Box<dyn AtomicReadAction>,
+    response_tx: oneshot::Sender<Result<Vec<u8>, ReadError>>,
 }
 
-enum ReadResponse {
-    SuccessfulSeek,
-    SuccessfulRead(Vec<u8>),
-}
-
-enum ReadAction {
-    Seek(i64),
-    Read(usize),
+/// This trait allows to inject read external logic with the guarantee that the provided [RotatingLogReader] is only available on a single thread,
+/// and no other thread can make any operation until [AtomicReadAction::read_from] has completed. This means that implementations of this trait can
+/// make any number of accesses to the disk without worrying about another producer thread sending a read request in the middle and producing unexpected
+/// outcomes. We opted for this design to decouple [LogManager] from the protocol layer. We wanted it to remain purely about low-level IO handling, and
+/// not requiring any knowledge about the binary format. That way, only minimal changes (if any) would be required to this code even if we entirely changed
+/// our approach for the binary format.
+#[automock]
+trait AtomicReadAction : Send + 'static {
+    fn read_from(&self, reader: &mut RotatingLogReader) -> io::Result<Vec<u8>>;
 }
 
 #[derive(Debug)]
@@ -334,16 +296,13 @@ struct PartitionLogReader {
 impl PartitionLogReader {
     fn start_read_loop(&mut self, loop_timeout: Duration, description: String) {
         start_mpsc_request_loop(&self.read_requests, |request| {
-            match request.action {
-                ReadAction::Seek(byte_offset) => self.reader.seek(byte_offset).map(|_| ReadResponse::SuccessfulSeek),
-                ReadAction::Read(len) => self.reader.read(len).map(|bytes| ReadResponse::SuccessfulRead(bytes)),
-            }.map_err(|e| ReadError::Io(e))
+            request.atomic_action.read_from(&mut self.reader).map_err(|e| ReadError::Io(e))
         }, loop_timeout, &self.shutdown, description);
     }
 }
 
-impl MpscRequest<ReadResponse, ReadError> for ReadRequest {
-    fn response_tx(self) -> oneshot::Sender<Result<ReadResponse, ReadError>> { self.response_tx }
+impl MpscRequest<Vec<u8>, ReadError> for ReadRequest {
+    fn response_tx(self) -> oneshot::Sender<Result<Vec<u8>, ReadError>> { self.response_tx }
 }
 
 fn start_mpsc_request_loop<Req, Res, Err, F>(

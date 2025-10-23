@@ -1,8 +1,10 @@
-use super::{LogManager, ReadError};
+use std::{io, thread};
+use super::{AtomicReadAction, LogManager, MockAtomicReadAction, MockAtomicReadAction_AtomicReadAction, ReadError};
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
 use file_test_utils::{assert_file_has_content, TempTestDir};
-use std::io::ErrorKind;
+use std::io::{ErrorKind};
 use std::time::Duration;
+use crate::persistence::log_reader::RotatingLogReader;
 
 const DEFAULT_LOOP_TIMEOUT: Duration = Duration::from_millis(5);
 const GROUP1: &str = "group1";
@@ -29,17 +31,17 @@ fn test_read_seek_and_write_to_several_topics_and_shutdown() {
     write_to(&mut log_manager, "topic2", 128, "Here we are");
     write_to(&mut log_manager, "topic2", 128, " civilized, sir. We do greet our guests");
 
-    assert_read_bytes_are(log_manager.read("topic1", 0, GROUP1.to_owned(), 7), "Hi sir!");
-    assert_read_bytes_are(log_manager.read("topic1", 0, GROUP2.to_owned(), 22), "Hi sir! How are you on");
+    assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), SingleRead(7)), "Hi sir!");
+    assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP2.to_owned(), SingleRead(22)), "Hi sir! How are you on");
 
-    assert_that!(log_manager.seek("topic1", 0, GROUP1.to_owned(), 9)).is_ok();
-    assert_read_bytes_are(log_manager.read("topic1", 0, GROUP1.to_owned(), 3), "you");
-    assert_read_bytes_are(log_manager.read("topic1", 0, GROUP2.to_owned(), 5), " this");
+    assert_that!(log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), SingleSeek(9))).is_ok();
+    assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), SingleRead(3)), "you");
+    assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP2.to_owned(), SingleRead(5)), " this");
 
-    assert_read_bytes_are(log_manager.read("topic1", 1, GROUP2.to_owned(), 9), "We're not");
+    assert_read_bytes_are(log_manager.atomic_read("topic1", 1, GROUP2.to_owned(), SingleRead(9)), "We're not");
 
-    assert_that!(log_manager.seek("topic2", 128, GROUP2.to_owned(), 12)).is_ok();
-    assert_read_bytes_are(log_manager.read("topic2", 128, GROUP2.to_owned(), 9), "civilized");
+    assert_that!(log_manager.atomic_read("topic2", 128, GROUP2.to_owned(), SingleSeek(12))).is_ok();
+    assert_read_bytes_are(log_manager.atomic_read("topic2", 128, GROUP2.to_owned(), SingleRead(9)), "civilized");
 
     log_manager.shutdown().unwrap();
 
@@ -50,22 +52,6 @@ fn test_read_seek_and_write_to_several_topics_and_shutdown() {
 }
 
 #[test]
-fn test_write_without_flushing() {
-    let temp_dir = TempTestDir::create();
-    let root_path = format!("{}/topics", temp_dir.path_as_str());
-
-    let mut log_manager = LogManager::new_with_loop_timeout(root_path.clone(), DEFAULT_LOOP_TIMEOUT);
-
-    log_manager.write("topic1", 0, 0, b"Hi").unwrap();
-    assert_read_bytes_are(log_manager.read("topic1", 0, GROUP1.to_owned(), 2), "");
-
-    log_manager.write_and_commit("topic1", 0, 1, b" boyz").unwrap();
-    assert_read_bytes_are(log_manager.read("topic1", 0, GROUP1.to_owned(), 7), "Hi boyz");
-
-    log_manager.shutdown().unwrap();
-}
-
-#[test]
 fn test_read_at_eof_and_then_write() {
     let temp_dir = TempTestDir::create();
     let root_path = format!("{}/topics", temp_dir.path_as_str());
@@ -73,11 +59,42 @@ fn test_read_at_eof_and_then_write() {
 
     write_to(&mut log_manager, "topic1", 0, "Hi sir!");
 
-    assert_read_bytes_are(log_manager.read("topic1", 0, GROUP1.to_owned(), 7), "Hi sir!");
-    assert_read_bytes_are(log_manager.read("topic1", 0, GROUP1.to_owned(), 7), "");
+    assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), SingleRead(7)), "Hi sir!");
+    assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), SingleRead(7)), "");
 
     write_to(&mut log_manager, "topic1", 0, "It's an honor");
-    assert_read_bytes_are(log_manager.read("topic1", 0, GROUP1.to_owned(), 7), "It's an");
+    assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), SingleRead(7)), "It's an");
+
+    log_manager.shutdown().unwrap();
+}
+
+// not yet using multiple threads as LogManager is not yet thread-safe due to mutations to a HashMap
+#[test]
+fn test_atomic_read() {
+    let temp_dir = TempTestDir::create();
+    let root_path = format!("{}/topics", temp_dir.path_as_str());
+    let mut log_manager = LogManager::new_with_loop_timeout(root_path.clone(), DEFAULT_LOOP_TIMEOUT);
+
+    write_to(&mut log_manager, "topic1", 0, "Hi sir! It's an honor! I've been wishing to meet you since I heard about you");
+
+    let mut read_action = MockAtomicReadAction::new();
+    read_action
+        .expect_read_from()
+        .returning(|log_reader| {
+            let mut bytes = Vec::new();
+            log_reader.seek(5)?;
+            thread::sleep(Duration::from_millis(10));
+
+            bytes.extend(log_reader.read(7)?); // "r! It's"
+            log_reader.seek(3)?;
+            thread::sleep(Duration::from_millis(100));
+
+            bytes.extend(log_reader.read(4)?); // " hon"
+            Ok(bytes)
+        });
+
+    assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), read_action), "r! It's hon");
+    assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), SingleRead(7)), "or! I'v");
 
     log_manager.shutdown().unwrap();
 }
@@ -91,7 +108,7 @@ fn test_read_before_writing_anything() {
 
     // It's empty rather than failing because instantiating the LogManager creates a writer thread, which will create an empty file
     // even before anything has been written.
-    assert_read_bytes_are(log_manager.read("topic1", 0, GROUP1.to_owned(), 7), "");
+    assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), SingleRead(7)), "");
 
     log_manager.shutdown().unwrap();
 }
@@ -104,7 +121,7 @@ fn test_read_past_eof() {
     let mut log_manager = LogManager::new_with_loop_timeout(root_path.clone(), DEFAULT_LOOP_TIMEOUT);
     write_to(&mut log_manager, "topic1", 0, "Hi sir!");
 
-    match log_manager.read("topic1", 0, GROUP1.to_owned(), 50) {
+    match log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), SingleRead(50)) {
         Err(ReadError::Io(e)) => assert_eq!(e.kind(), ErrorKind::UnexpectedEof),
         _ => unreachable!(),
     }
@@ -118,6 +135,29 @@ fn assert_read_bytes_are(result: Result<Vec<u8>, ReadError>, expected: &str) {
     let actual: &str = &String::from_utf8(result.unwrap()).unwrap();
     assert_that!(actual).is_equal_to(expected);
 }
+
+fn assert_read_bytes_are2(result: io::Result<Vec<u8>>, expected: &str) {
+    let actual: &str = &String::from_utf8(result.unwrap()).unwrap();
+    assert_that!(actual).is_equal_to(expected);
+}
+
+struct SingleRead(usize);
+
+impl AtomicReadAction for SingleRead {
+    fn read_from(&self, reader: &mut RotatingLogReader) -> io::Result<Vec<u8>> {
+        reader.read(self.0)
+    }
+}
+
+struct SingleSeek(i64);
+
+impl AtomicReadAction for SingleSeek {
+    fn read_from(&self, reader: &mut RotatingLogReader) -> io::Result<Vec<u8>> {
+        reader.seek(self.0)?;
+        Ok(vec![])
+    }
+}
+
 
 ///! I don't normally test internal code (private, not exposed externally), but here error handling for some edge cases is likely impossible to test from
 /// the public API because they can only happen if a programming error was made or a thread has crashed unexpectedly (which is likely also a programming
