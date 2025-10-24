@@ -1,9 +1,12 @@
-use std::io::{Cursor, Read, Write};
 use crate::primitives::*;
+use std::io;
+use std::io::{Cursor, Read, Write};
 
 #[cfg(test)]
 #[path="record_test.rs"]
 mod record_test;
+
+pub const BATCH_METADATA_SIZE: usize = 1 + 8 + 4 + 4;
 
 /// Format inspired (but simplified) from [here](https://kafka.apache.org/documentation/#recordbatch)
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -12,6 +15,14 @@ pub struct RecordBatch {
     pub base_timestamp: u64,
     // should normally add a limit of number of records and total byte size but to simplify the code I'll skip that. Not important for a learning project.
     pub records: Vec<Record>,
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct RecordBatchMetadata {
+    pub protocol_version: u8,
+    pub base_timestamp: u64,
+    pub payload_byte_size: u32,
+    pub record_count: u32
 }
 
 /// Format inspired (but simplified) from [here](https://kafka.apache.org/documentation/#record)
@@ -30,7 +41,7 @@ pub struct Header {
 }
 
 /// Serializes the batch in binary format into a new vector and returns it
-pub fn serialize_batch(batch: RecordBatch) -> Vec<u8> {
+fn serialize_batch(batch: RecordBatch) -> Vec<u8> {
     let mut bytes = Vec::new();
     serialize_batch_into(batch, &mut bytes);
     bytes
@@ -110,19 +121,24 @@ fn snappy_compress(bytes: Vec<u8>) -> Vec<u8> {
     compressed_bytes
 }
 
-pub fn deserialize_batch(bytes: Vec<u8>) -> RecordBatch {
-    let protocol_version = bytes[0];
-    let base_timestamp = u64::from_le_bytes(bytes[1..9].try_into().unwrap());
-    let record_count = u32::from_le_bytes(bytes[9..13].try_into().unwrap());
-    let record_byte_count = u32::from_le_bytes(bytes[13..17].try_into().unwrap());
+pub fn read_next_batch<R: Read>(reader: &mut R) -> io::Result<RecordBatch> {
+    let metadata = read_batch_metadata(reader)?;
 
-    let compressed_record_bytes = &bytes[17..];
-    let actual_record_byte_count = compressed_record_bytes.len();
-    if actual_record_byte_count as u32 != record_byte_count {
-        panic!("Expected exactly {record_byte_count} bytes for compressed records but had {actual_record_byte_count}");
+    let mut record_bytes = vec![0u8 ; metadata.payload_byte_size as usize];
+    reader.read_exact(&mut record_bytes)?;
+
+    Ok(deserialize_batch(metadata, &record_bytes))
+}
+
+fn deserialize_batch(metadata: RecordBatchMetadata, compressed_record_bytes: &[u8]) -> RecordBatch {
+    let RecordBatchMetadata { protocol_version, base_timestamp, payload_byte_size, record_count} = metadata;
+
+    let actual_record_byte_count = compressed_record_bytes.len() as u32;
+    if actual_record_byte_count != payload_byte_size {
+        panic!("Expected exactly {payload_byte_size} bytes for compressed records but had {actual_record_byte_count}");
     }
 
-    let record_bytes = snappy_decompress(compressed_record_bytes);
+    let record_bytes = snappy_decompress(&compressed_record_bytes);
 
     let mut remaining_record_bytes: &[u8] = &record_bytes;
     let mut records = Vec::new();
@@ -139,6 +155,31 @@ pub fn deserialize_batch(bytes: Vec<u8>) -> RecordBatch {
     }
 
     RecordBatch { protocol_version, base_timestamp, records }
+}
+
+pub fn read_batch_metadata<R: Read>(reader: &mut R) -> io::Result<RecordBatchMetadata> {
+    let mut bytes = [0u8; BATCH_METADATA_SIZE];
+    reader.read_exact(&mut bytes)?;
+    Ok(deserialize_batch_metadata(&bytes))
+}
+
+/// From a slice containing an entire serialized batch, this function parses only the metadata and returns the rest of the slice
+pub fn deserialize_batch_metadata(bytes: &[u8]) -> RecordBatchMetadata {
+    if bytes.len() != BATCH_METADATA_SIZE {
+        panic!("Tried deserializing batch metadata from a slice of {} when exactly {BATCH_METADATA_SIZE} should be provided", bytes.len());
+    }
+
+    let protocol_version = bytes[0];
+    let base_timestamp = u64::from_le_bytes(bytes[1..9].try_into().unwrap());
+    let record_count = u32::from_le_bytes(bytes[9..13].try_into().unwrap());
+    let payload_byte_size = u32::from_le_bytes(bytes[13..17].try_into().unwrap());
+
+    RecordBatchMetadata {
+        protocol_version,
+        base_timestamp,
+        record_count,
+        payload_byte_size,
+    }
 }
 
 fn read_next_record(bytes: &[u8], base_timestamp: u64) -> (&[u8], Record) {
