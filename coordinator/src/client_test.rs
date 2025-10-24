@@ -1,5 +1,5 @@
 use crate::client::Error::*;
-use crate::client::{Client, MockHttpClient};
+use crate::client::{Client, ClientImpl, MockHttpClient};
 use crate::model::*;
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
 use mockall::predicate;
@@ -41,7 +41,7 @@ fn test_client_post_success_use_tls() {
             .unwrap()
         ));
 
-    let client = Client::new_with_http_client(DOMAIN.to_string(), true, Box::new(http_client_mock));
+    let client = ClientImpl::new_with_http_client(DOMAIN.to_string(), true, Box::new(http_client_mock));
     assert_that!(client.create_topic(CreateTopicRequest { name: String::from("topic"), partition_count: 128 })).has_ok(());
 }
 
@@ -133,6 +133,6 @@ fn test_client_post_with_response_body_invalid_body() {
     }
 }
 
-fn new_client(http_client_mock: MockHttpClient) -> Client {
-    Client::new_with_http_client(DOMAIN.to_string(), USE_TLS, Box::new(http_client_mock))
+fn new_client(http_client_mock: MockHttpClient) -> ClientImpl {
+    ClientImpl::new_with_http_client(DOMAIN.to_string(), USE_TLS, Box::new(http_client_mock))
 }

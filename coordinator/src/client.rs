@@ -19,14 +19,24 @@ pub enum Error {
     Api(String),
 }
 
-pub struct Client {
+#[automock]
+pub trait Client : Send + Sync {
+    fn create_topic(&self, request: CreateTopicRequest) -> Result<()>;
+    fn get_topic(&self, request: GetTopicRequest) -> Result<GetTopicResponse>;
+    fn increment_write_offset(&self, request: IncrementWriteOffsetRequest) -> Result<()>;
+    fn get_write_offset(&self, request: GetWriteOffsetRequest) -> Result<GetWriteOffsetResponse>;
+    fn ack_read_offset(&self, request: AckReadOffsetRequest) -> Result<()>;
+    fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse>;
+}
+
+pub struct ClientImpl {
     url_base: String,
     http_client: Box<dyn HttpClient>,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-impl Client {
+impl ClientImpl {
     pub fn new(domain: String, use_tls: bool) -> Self {
         let config = Agent::config_builder()
             // I don't like the default handling because it doesn't return the body, which contains error messages
@@ -44,34 +54,6 @@ impl Client {
             url_base: format!("{protocol}://{domain}"),
             http_client,
         }
-    } 
-
-    pub fn create_topic(&self, request: CreateTopicRequest) -> Result<()> {
-        self.post(CREATE_TOPIC, request)?;
-        Ok(())
-    }
-
-    pub fn get_topic(&self, request: GetTopicRequest) -> Result<GetTopicResponse> {
-        // see TODO.md (improvements) on why I'm using PUT for a read-only operation
-        Ok(self.post_and_parse(GET_TOPIC, request)?)
-    }
-
-    pub fn increment_write_offset(&self, request: IncrementWriteOffsetRequest) -> Result<()> {
-        self.post(INCREMENT_WRITE_OFFSET, request)?;
-        Ok(())
-    }
-
-    pub fn get_write_offset(&self, request: GetWriteOffsetRequest) -> Result<GetWriteOffsetResponse> {
-        Ok(self.post_and_parse(GET_WRITE_OFFSET, request)?)
-    }
-
-    pub fn ack_read_offset(&self, request: AckReadOffsetRequest) -> Result<()> {
-        self.post(ACK_READ_OFFSET, request)?;
-        Ok(())
-    }
-
-    pub fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse> {
-        Ok(self.post_and_parse(GET_WRITE_OFFSET, request)?)
     }
 
     fn post_and_parse<Req, Res>(&self, api: &str, request: Req) -> Result<Res>
@@ -98,8 +80,38 @@ impl Client {
     }
 }
 
+impl Client for ClientImpl {
+    fn create_topic(&self, request: CreateTopicRequest) -> Result<()> {
+        self.post(CREATE_TOPIC, request)?;
+        Ok(())
+    }
+
+    fn get_topic(&self, request: GetTopicRequest) -> Result<GetTopicResponse> {
+        // see TODO.md (improvements) on why I'm using PUT for a read-only operation
+        Ok(self.post_and_parse(GET_TOPIC, request)?)
+    }
+
+    fn increment_write_offset(&self, request: IncrementWriteOffsetRequest) -> Result<()> {
+        self.post(INCREMENT_WRITE_OFFSET, request)?;
+        Ok(())
+    }
+
+    fn get_write_offset(&self, request: GetWriteOffsetRequest) -> Result<GetWriteOffsetResponse> {
+        Ok(self.post_and_parse(GET_WRITE_OFFSET, request)?)
+    }
+
+    fn ack_read_offset(&self, request: AckReadOffsetRequest) -> Result<()> {
+        self.post(ACK_READ_OFFSET, request)?;
+        Ok(())
+    }
+
+    fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse> {
+        Ok(self.post_and_parse(GET_WRITE_OFFSET, request)?)
+    }
+}
+
 #[automock]
-pub trait HttpClient {
+trait HttpClient : Send + Sync {
     fn post(&self, uri: &str, body: &str) -> std::result::Result<Response<Body>, ureq::Error>;
 }
 
