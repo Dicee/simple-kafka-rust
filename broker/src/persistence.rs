@@ -1,11 +1,12 @@
 mod append_only_log;
 mod log_reader;
-mod indexing;
+pub mod indexing;
 
 #[cfg(test)]
 mod persistence_test;
 
-use crate::persistence::log_reader::RotatingLogReader;
+pub use log_reader::RotatingLogReader;
+
 use append_only_log::*;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -15,6 +16,7 @@ use std::sync::{atomic, Arc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use std::{io, iter, thread};
+use std::io::Error;
 use std::path::PathBuf;
 use mockall::automock;
 use tokio::sync::oneshot;
@@ -85,13 +87,13 @@ impl LogManager {
         self.get_or_create_partition_manager(topic, partition, |e| WriteError::Io(e))?.write(index, buf, true)
     }
 
-    /// Atomically performs arbitrary read operations specified by the [AtomicReadAction] with the guarantee that no other threads will be able to interleave 
+    /// Atomically performs arbitrary read operations specified by the [AtomicReadAction] with the guarantee that no other threads will be able to interleave
     /// any read operation to the same [RotatingLogReader] as long as this action is running.
     /// # Errors
     /// - [ReadError::Io] if an IO error occurs during the read operation
     /// - [ReadError::ReaderThreadDisconnected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    pub fn atomic_read(&mut self, topic: &str, partition: u32, consumer_group: String, atomic_read: impl AtomicReadAction) -> Result<Vec<u8>, ReadError> {
+    pub fn atomic_read(&mut self, topic: &str, partition: u32, consumer_group: String, atomic_read: impl AtomicReadAction) -> Result<IndexedRecord, ReadError> {
         self.get_or_create_partition_manager(topic, partition, |e| ReadError::Io(e))?.atomic_read(consumer_group, atomic_read)
     }
 
@@ -182,26 +184,25 @@ impl PartitionLogManager {
         response_rx.blocking_recv().unwrap_or_else(|_| Err(WriteError::WriterThreadDisconnected))
     }
 
-    /// Atomically performs arbitrary read operations specified by the [AtomicReadAction] with the guarantee that no other threads will be able to interleave 
+    /// Atomically performs arbitrary read operations specified by the [AtomicReadAction] with the guarantee that no other threads will be able to interleave
     /// any read operation to the same [RotatingLogReader] as long as this action is running.
     /// # Errors
     /// - [ReadError::Io] if an IO error occurs during the read operation
     /// - [ReadError::ReaderThreadDisconnected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    fn atomic_read(&mut self, consumer_group: String, atomic_action: impl AtomicReadAction) -> Result<Vec<u8>, ReadError> {
+    fn atomic_read(&mut self, consumer_group: String, atomic_action: impl AtomicReadAction) -> Result<IndexedRecord, ReadError> {
         let atomic_action = Box::new(atomic_action);
         let consumer_manager = match self.consumers.entry(consumer_group.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
                 let (reader_tx, reader_rx) = std::sync::mpsc::channel();
                 let mut reader = PartitionLogReader {
-                    // we don't support lookup by offset yet so we always start from the beginning of the first file
-                    reader: RotatingLogReader::open(self.root_path.clone(), 0).map_err(|e| ReadError::Io(e))?,
+                    reader: atomic_action.initialize(&self.root_path)?,
                     read_requests: reader_rx,
                     shutdown: Arc::clone(&self.shutdown),
                 };
 
-                let loop_timeout = self.loop_timeout;
+                let loop_timeout = self.loop_timeout; // avoid capturing self in the closure
                 let reader_description = format!("Reader(topic={}, partition={}, consumer_group={})", self.topic, self.partition, consumer_group);
                 let reader_thread = thread::spawn(move || reader.start_read_loop(loop_timeout, reader_description));
                 entry.insert(ConsumerManager { reader_tx, reader_thread })
@@ -266,7 +267,7 @@ impl MpscRequest<(), WriteError> for WriteRequest {
 
 struct ReadRequest {
     atomic_action: Box<dyn AtomicReadAction>,
-    response_tx: oneshot::Sender<Result<Vec<u8>, ReadError>>,
+    response_tx: oneshot::Sender<Result<IndexedRecord, ReadError>>,
 }
 
 /// This trait allows to inject read external logic with the guarantee that the provided [RotatingLogReader] is only available on a single thread,
@@ -276,15 +277,26 @@ struct ReadRequest {
 /// not requiring any knowledge about the binary format. That way, only minimal changes (if any) would be required to this code even if we entirely changed
 /// our approach for the binary format.
 #[automock]
-trait AtomicReadAction : Send + 'static {
-    fn read_from(&self, reader: &mut RotatingLogReader) -> io::Result<Vec<u8>>;
+pub trait AtomicReadAction : Send + 'static {
+    fn initialize(&self, root_path: &str) -> io::Result<RotatingLogReader>;
+
+    // TODO: should it be io::Result?
+    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, ReadError>;
 }
+
+#[derive(Debug)]
+pub struct IndexedRecord(pub u64, pub Vec<u8>);
 
 #[derive(Debug)]
 pub enum ReadError {
     ReaderThreadDisconnected,
     Io(io::Error),
 }
+
+impl From<io::Error> for ReadError {
+    fn from(e: Error) -> Self { ReadError::Io(e) }
+}
+
 
 /// Handles the resources and logic to continuously read from a rotating log file for a single partition.
 struct PartitionLogReader {
@@ -296,13 +308,13 @@ struct PartitionLogReader {
 impl PartitionLogReader {
     fn start_read_loop(&mut self, loop_timeout: Duration, description: String) {
         start_mpsc_request_loop(&self.read_requests, |request| {
-            request.atomic_action.read_from(&mut self.reader).map_err(|e| ReadError::Io(e))
+            request.atomic_action.read_from(&mut self.reader)
         }, loop_timeout, &self.shutdown, description);
     }
 }
 
-impl MpscRequest<Vec<u8>, ReadError> for ReadRequest {
-    fn response_tx(self) -> oneshot::Sender<Result<Vec<u8>, ReadError>> { self.response_tx }
+impl MpscRequest<IndexedRecord, ReadError> for ReadRequest {
+    fn response_tx(self) -> oneshot::Sender<Result<IndexedRecord, ReadError>> { self.response_tx }
 }
 
 fn start_mpsc_request_loop<Req, Res, Err, F>(

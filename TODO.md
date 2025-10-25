@@ -1,6 +1,12 @@
+# TODO
+
+## Features
+
+- add an API on the broker to initialize a reader to the proper offset. This is in case a consumer dies and then reconnects, without having acknowledged the
+  records it had read. This allows the client to rewind the stream to where it left off.
+
 ## Improvements
 
-- consider replacing panicking with custom error types in the protocol's ser/de
 - consider having writes to the `LogManager` concurrent by having one thread per log file, or a
   bounded pool paired with a collection of locks (one per file)
 - return fine-grained, strongly typed deserializable errors from my HTTP clients for API 4xx
@@ -11,8 +17,18 @@
 ### Optimizations
 
 - process several batches together on the broker write path, waiting (a limited amount of time) to receive a few messages from the channel and write them all at once
+- avoid negative seeks and reading batch metadata twice (however since these are small seeks it's almost certain that they happen fully in memory, and do not
+  have a high cost)
 
 ## Bugs
 
 - move from simple-server to actix-web, as it seems like even in simple use cases simple-server has a bug causing transient issues with the body being empty
   even when the client sent a non-empty body
+- we might need to use `read` rather than `read_exact` to implement `read_u64_le` because if we're unlucky the write buffer might be flush while writing the offset,
+  before all bytes of the offset have been written, and the reader might see this data and fail to read a `u64`.
+
+# Done
+
+## Improvements
+
+- ~~consider replacing panicking with custom error types in the protocol's ser/de~~ I think that's the right handling after all

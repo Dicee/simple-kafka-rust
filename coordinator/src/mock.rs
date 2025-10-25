@@ -26,11 +26,11 @@ impl crate::client::Client for DummyCoordinatorClient {
 
     fn increment_write_offset(&self, request: IncrementWriteOffsetRequest) -> crate::client::Result<()> {
         let mut write_offsets = self.write_offsets.lock().unwrap();
-        let write_offset = write_offsets
+        write_offsets
             .entry(TopicPartition(request.topic, request.partition))
-            .or_insert(0);
+            .and_modify(|offset| *offset += request.inc as u64)
+            .or_insert(request.inc as u64 - 1); // since it's 0-indexed, the first time we have to increment by request.inc - 1
 
-        *write_offset += request.inc as u64;
         Ok(())
     }
 

@@ -132,8 +132,8 @@ impl Drop for LogIndexWriter {
 
 #[derive(Eq, PartialEq, Debug)]
 pub struct IndexLookupResult {
-    log_file_path: PathBuf,
-    byte_offset: u64,
+    pub log_file_path: PathBuf,
+    pub byte_offset: u64,
 }
 
 /// Finds the log file, if any, which contains a given index, and provides a byte offset within this file which is close to the actual byte offset

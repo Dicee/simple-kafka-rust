@@ -1,5 +1,5 @@
 use std::{io, thread};
-use super::{AtomicReadAction, LogManager, MockAtomicReadAction, MockAtomicReadAction_AtomicReadAction, ReadError};
+use super::{AtomicReadAction, IndexedRecord, LogManager, MockAtomicReadAction, MockAtomicReadAction_AtomicReadAction, ReadError};
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
 use file_test_utils::{assert_file_has_content, TempTestDir};
 use std::io::{ErrorKind};
@@ -78,6 +78,8 @@ fn test_atomic_read() {
     write_to(&mut log_manager, "topic1", 0, "Hi sir! It's an honor! I've been wishing to meet you since I heard about you");
 
     let mut read_action = MockAtomicReadAction::new();
+
+    read_action.expect_initialize().returning(|root_path| RotatingLogReader::open_for_index(root_path.to_owned(), 0));
     read_action
         .expect_read_from()
         .returning(|log_reader| {
@@ -90,7 +92,7 @@ fn test_atomic_read() {
             thread::sleep(Duration::from_millis(100));
 
             bytes.extend(log_reader.read(4)?); // " hon"
-            Ok(bytes)
+            Ok(IndexedRecord(0, bytes))
         });
 
     assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), read_action), "r! It's hon");
@@ -131,30 +133,33 @@ fn write_to(log_manager: &mut LogManager, topic: &str, partition: u32, content: 
     log_manager.write_and_commit(topic, partition, 0, content.as_bytes()).unwrap();
 }
 
-fn assert_read_bytes_are(result: Result<Vec<u8>, ReadError>, expected: &str) {
-    let actual: &str = &String::from_utf8(result.unwrap()).unwrap();
-    assert_that!(actual).is_equal_to(expected);
-}
-
-fn assert_read_bytes_are2(result: io::Result<Vec<u8>>, expected: &str) {
-    let actual: &str = &String::from_utf8(result.unwrap()).unwrap();
+fn assert_read_bytes_are(result: Result<IndexedRecord, ReadError>, expected: &str) {
+    let actual: &str = &String::from_utf8(result.unwrap().1).unwrap();
     assert_that!(actual).is_equal_to(expected);
 }
 
 struct SingleRead(usize);
 
 impl AtomicReadAction for SingleRead {
-    fn read_from(&self, reader: &mut RotatingLogReader) -> io::Result<Vec<u8>> {
-        reader.read(self.0)
+    fn initialize(&self, root_path: &str) -> io::Result<RotatingLogReader> {
+        RotatingLogReader::open_for_index(root_path.to_owned(), 0)
+    }
+
+    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, ReadError> {
+        Ok(IndexedRecord(0, reader.read(self.0)?))
     }
 }
 
 struct SingleSeek(i64);
 
 impl AtomicReadAction for SingleSeek {
-    fn read_from(&self, reader: &mut RotatingLogReader) -> io::Result<Vec<u8>> {
+    fn initialize(&self, root_path: &str) -> io::Result<RotatingLogReader> {
+        RotatingLogReader::open_for_index(root_path.to_owned(), 0)
+    }
+    
+    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, ReadError> {
         reader.seek(self.0)?;
-        Ok(vec![])
+        Ok(IndexedRecord(0, vec![]))
     }
 }
 
