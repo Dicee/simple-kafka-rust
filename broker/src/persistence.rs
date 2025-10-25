@@ -280,8 +280,7 @@ struct ReadRequest {
 pub trait AtomicReadAction : Send + 'static {
     fn initialize(&self, root_path: &str) -> io::Result<RotatingLogReader>;
 
-    // TODO: should it be io::Result?
-    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, ReadError>;
+    fn read_from(&self, reader: &mut RotatingLogReader) -> io::Result<IndexedRecord>;
 }
 
 #[derive(Debug)]
@@ -308,7 +307,7 @@ struct PartitionLogReader {
 impl PartitionLogReader {
     fn start_read_loop(&mut self, loop_timeout: Duration, description: String) {
         start_mpsc_request_loop(&self.read_requests, |request| {
-            request.atomic_action.read_from(&mut self.reader)
+            request.atomic_action.read_from(&mut self.reader).map_err(|e| ReadError::Io(e))
         }, loop_timeout, &self.shutdown, description);
     }
 }
