@@ -6,6 +6,8 @@ pub const INCREMENT_WRITE_OFFSET: &str = "/increment-write-offset";
 pub const GET_WRITE_OFFSET: &str = "/get-write-offset";
 pub const ACK_READ_OFFSET: &str = "/ack-read-offset";
 pub const GET_READ_OFFSET: &str = "/get-read-offset";
+pub const LIST_BROKERS: &str = "/list-brokers";
+pub const REGISTER_BROKER: &str = "/register-broker";
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]
@@ -76,4 +78,32 @@ pub struct GetReadOffsetResponse {
 pub struct ErrorResponse {
     pub status_code: u16,
     pub message: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct ListBrokersRequest {}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct ListBrokersResponse {
+    pub brokers: Vec<HostAndPort>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct RegisterBrokerRequest {
+    pub host: String,
+    pub port: u16,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub struct HostAndPort {
+    pub host: String,
+    pub port: u16,
+}
+
+impl HostAndPort {
+    pub fn new(host: String, port: u16) -> Self { Self { host, port } }
 }

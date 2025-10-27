@@ -27,6 +27,8 @@ pub trait Client : Send + Sync {
     fn get_write_offset(&self, request: GetWriteOffsetRequest) -> Result<GetWriteOffsetResponse>;
     fn ack_read_offset(&self, request: AckReadOffsetRequest) -> Result<()>;
     fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse>;
+    fn list_brokers(&self, request: ListBrokersRequest) -> Result<ListBrokersResponse>;
+    fn register_broker(&self, request: RegisterBrokerRequest) -> Result<()>;
 }
 
 pub struct ClientImpl {
@@ -107,6 +109,15 @@ impl Client for ClientImpl {
 
     fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse> {
         Ok(self.post_and_parse(GET_WRITE_OFFSET, request)?)
+    }
+
+    fn list_brokers(&self, request: ListBrokersRequest) -> Result<ListBrokersResponse> {
+        Ok(self.post_and_parse(REGISTER_BROKER, request)?)
+    }
+
+    fn register_broker(&self, request: RegisterBrokerRequest) -> Result<()> {
+        self.post(REGISTER_BROKER, request)?;
+        Ok(())
     }
 }
 

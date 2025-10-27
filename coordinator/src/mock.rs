@@ -23,6 +23,8 @@ impl DummyCoordinatorClient {
 impl crate::client::Client for DummyCoordinatorClient {
     fn create_topic(&self, request: CreateTopicRequest) -> crate::client::Result<()> { unimplemented!() }
     fn get_topic(&self, request: GetTopicRequest) -> crate::client::Result<GetTopicResponse> { unimplemented!() }
+    fn list_brokers(&self, request: ListBrokersRequest) -> crate::client::Result<ListBrokersResponse> { unimplemented!() }
+    fn register_broker(&self, request: RegisterBrokerRequest) -> crate::client::Result<()> { unimplemented!() }
 
     fn increment_write_offset(&self, request: IncrementWriteOffsetRequest) -> crate::client::Result<()> {
         let mut write_offsets = self.write_offsets.lock().unwrap();

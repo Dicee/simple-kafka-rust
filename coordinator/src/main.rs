@@ -4,11 +4,13 @@ use simple_server::{Builder, Method, Request, ResponseBuilder, ResponseResult, S
 use std::fmt::Display;
 use std::path::Path;
 
-use crate::dao::Dao;
 use crate::dao::Error::{Internal, TopicNotFound};
+use crate::dao::MetadataAndStateDao;
+use crate::registry::BrokerRegistry;
 use coordinator::model::*;
 
 mod dao;
+mod registry;
 
 #[cfg(test)]
 mod main_test;
@@ -31,7 +33,8 @@ struct Args {
 
 fn main() {
     let args: Args = argh::from_env();
-    let dao = Dao::new(Path::new(&args.db_path)).unwrap();
+    let dao = MetadataAndStateDao::new(Path::new(&args.db_path)).unwrap();
+    let broker_registry = BrokerRegistry::new();
 
     let server = Server::new(move |request, mut response| {
         let uri = request.uri();
@@ -43,6 +46,8 @@ fn main() {
             GET_WRITE_OFFSET => handle_get_write_offset(&dao, &request, &mut response),
             ACK_READ_OFFSET => handle_ack_read_offset(&dao, &request, &mut response),
             GET_READ_OFFSET => handle_get_read_offset(&dao, &request, &mut response),
+            LIST_BROKERS => handle_list_brokers(broker_registry.clone(), &request, &mut response),
+            REGISTER_BROKER => handle_register_broker(broker_registry.clone(), &request, &mut response),
             _ => handle_error(&mut response, format!("Unknown API {uri}"), StatusCode::NOT_FOUND),
         };
         response
@@ -50,37 +55,51 @@ fn main() {
     server.listen(&args.host, &args.port.to_string());
 }
 
-fn handle_create_topic(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+fn handle_create_topic(dao: &MetadataAndStateDao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
     handle(Method::POST, &request, &mut response, |r: CreateTopicRequest| dao.create_topic(&r.name, r.partition_count))
 }
 
-fn handle_get_topic(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+fn handle_get_topic(dao: &MetadataAndStateDao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
     // see TODO.md (improvements) on why I'm using PUT for a read-only operation
     handle(Method::POST, &request, &mut response, |r: GetTopicRequest| dao.get_topic(&r.name)
         .map(|topic| GetTopicResponse { name: topic.name, partition_count: topic.partition_count })
     )
 }
 
-fn handle_increment_write_offset(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+fn handle_increment_write_offset(dao: &MetadataAndStateDao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
     handle(Method::POST, &request, &mut response, |r: IncrementWriteOffsetRequest| dao.inc_write_offset_by(&r.topic, r.partition, r.inc))
 }
 
-fn handle_get_write_offset(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+fn handle_get_write_offset(dao: &MetadataAndStateDao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
     // see TODO.md (improvements) on why I'm using PUT for a read-only operation
     handle(Method::POST, &request, &mut response, |r: GetWriteOffsetRequest| dao.get_write_offset(&r.topic, r.partition)
         .map(|offset| GetWriteOffsetResponse { offset })
     )
 }
 
-fn handle_ack_read_offset(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+fn handle_ack_read_offset(dao: &MetadataAndStateDao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
     handle(Method::POST, &request, &mut response, |r: AckReadOffsetRequest| dao.ack_read_offset(&r.topic, r.partition, &r.consumer_group, r.offset))
 }
 
-fn handle_get_read_offset(dao: &Dao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+fn handle_get_read_offset(dao: &MetadataAndStateDao, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
     // see TODO.md (improvements) on why I'm using PUT for a read-only operation
     handle(Method::POST, &request, &mut response, |r: GetReadOffsetRequest| dao.get_read_offset(&r.topic, r.partition, &r.consumer_group)
         .map(|offset| GetReadOffsetResponse { offset })
     )
+}
+
+fn handle_list_brokers(registry: BrokerRegistry, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+    // see TODO.md (improvements) on why I'm using PUT for a read-only operation
+    handle(Method::POST, &request, &mut response, |_: ListBrokersRequest| {
+        // real shame that I have to clone but since I plan to move to a different server crate I don't want to invest now on making the handler
+        // method even more generic or doing something fancy for the deserialization
+        let brokers = registry.brokers().iter().map(HostAndPort::clone).collect::<Vec<_>>();
+        Ok(ListBrokersResponse { brokers })
+    })
+}
+
+fn handle_register_broker(mut registry: BrokerRegistry, request: &Request<Vec<u8>>, mut response: &mut Builder) -> ResponseResult {
+    handle(Method::POST, &request, &mut response, |r: RegisterBrokerRequest| Ok(registry.register_broker(HostAndPort { host: r.host, port: r.port })))
 }
 
 fn handle<Req, Res, H>(method: Method, request: &Request<Vec<u8>>, response: &mut ResponseBuilder, do_handle: H) -> ResponseResult

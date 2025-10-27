@@ -42,7 +42,8 @@ pub struct Topic {
     pub partition_count: u32,
 }
 
-pub struct Dao {
+/// Manages the persistence logic of topic metadata as well as the state of read and write offsets
+pub struct MetadataAndStateDao {
     connection_pool: Pool<SqliteConnectionManager>,
 }
 
@@ -63,7 +64,7 @@ pub enum InvalidOffset {
     NoDataWritten,
 }
 
-impl Dao {
+impl MetadataAndStateDao {
     pub fn new(db_path: &Path) -> Result<Self> {
         let connection_manager = SqliteConnectionManager::file(db_path);
         let connection_pool = Pool::new(connection_manager)?;

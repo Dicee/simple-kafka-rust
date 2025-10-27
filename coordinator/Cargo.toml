@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 argh.workspace = true
+linked_hash_set = "0.1.5"
 mockall.workspace = true
 rusqlite = {version = "0.37.0", features = ["bundled"]}
 r2d2 = "0.8.10"

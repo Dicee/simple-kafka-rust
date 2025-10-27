@@ -230,6 +230,6 @@ fn test_get_read_offset_out_of_range_partition() {
         .has_err(Error::OutOfRangePartition { topic, invalid_partition });
 }
 
-fn new_dao(temp_file: &TempTestFile) -> Dao {
-    Dao::new(&Path::new(temp_file.path())).unwrap()
+fn new_dao(temp_file: &TempTestFile) -> MetadataAndStateDao {
+    MetadataAndStateDao::new(&Path::new(temp_file.path())).unwrap()
 }
