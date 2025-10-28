@@ -48,7 +48,7 @@ fn test_publish_write_offset_not_committed_if_failure_coordinator_failure() {
 
     let mut coordinator_client = coordinator::MockClient::new();
     coordinator_client.expect_get_write_offset()
-        .returning(|_| Err(coordinator::client::Error::Api(String::from("Oopsy"))));
+        .returning(|_| Err(coordinator::Error::Api(String::from("Oopsy"))));
 
     coordinator_client.expect_increment_write_offset().never();
 

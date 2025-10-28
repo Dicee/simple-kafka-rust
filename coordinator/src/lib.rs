@@ -2,7 +2,7 @@
 //! In the real world, we would use a proper and/or something like etcd/ZooKeeper. More information about this decision
 //! in the global README (out-of-scope features).
 
-pub mod client;
+mod client;
 pub mod model;
 
 pub mod mock;
@@ -12,3 +12,5 @@ pub use client::Client as Client;
 pub use client::ClientImpl as ClientImpl;
 pub use client::MockClient as MockClient;
 pub use mock::DummyClient as DummyClient;
+pub use client::Result;
+pub use client::Error;

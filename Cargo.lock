@@ -296,6 +296,7 @@ dependencies = [
  "actix-web",
  "argh",
  "assertor",
+ "client_utils",
  "coordinator",
  "file_test_utils",
  "mockall",

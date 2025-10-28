@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 actix-web.workspace = true
 argh.workspace = true
+client_utils = { path = "../client_utils" }
 coordinator = { path = "../coordinator" }
 mockall.workspace = true
 protocol = { path = "../protocol" }

@@ -198,8 +198,8 @@ fn open_log_at_record_offset(record_offset: u64, log_file_path: PathBuf, byte_of
     Ok(log_reader)
 }
 
-impl From<coordinator::client::Error> for Error {
-    fn from(err: coordinator::client::Error) -> Self { Coordinator(format!("{err:?}")) }
+impl From<coordinator::Error> for Error {
+    fn from(err: coordinator::Error) -> Self { Coordinator(format!("{err:?}")) }
 }
 
 impl From<io::Error> for Error {

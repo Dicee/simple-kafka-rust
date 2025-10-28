@@ -45,23 +45,30 @@ impl ApiClient {
 
     pub fn get<Res>(&self, api: &str) -> Result<Res> where for<'de> Res: Deserialize<'de> {
         let uri = format!("{}{api}", self.url_base);
-        let mut response = self.http_client.get(&uri)?;
-
-        if !response.status().is_success() {
-            Err(Api(response.body_mut().read_to_string()?))
-        } else {
-            Ok(response.body_mut().read_json()?)
-        }
+        Self::parse_response(self.http_client.get(&uri)?)
     }
 
     pub fn post<Req: Serialize>(&self, api: &str, request: Req) -> Result<()> {
         let uri = format!("{}{api}", self.url_base);
         let mut response = self.http_client.post(&uri, SendBody::from_json(&request)?)?;
-
         if !response.status().is_success() {
             Err(Api(response.body_mut().read_to_string()?))
         } else {
             Ok(())
+        }
+    }
+
+    pub fn post_and_parse<Req: Serialize, Res>(&self, api: &str, request: Req) -> Result<Res>
+    where for<'de> Res: Deserialize<'de> {
+        let uri = format!("{}{api}", self.url_base);
+        Self::parse_response(self.http_client.post(&uri, SendBody::from_json(&request)?)?)
+    }
+
+    fn parse_response<Res>(mut response: Response<Body>) -> Result<Res> where for<'de> Res: Deserialize<'de> {
+        if !response.status().is_success() {
+            Err(Api(response.body_mut().read_to_string()?))
+        } else {
+            Ok(response.body_mut().read_json()?)
         }
     }
 }

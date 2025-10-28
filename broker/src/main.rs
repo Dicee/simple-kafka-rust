@@ -2,17 +2,17 @@
 
 use actix_web::error::BlockingError;
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
-use coordinator::client::{Client, ClientImpl as CoordinatorClient};
 use std::sync::Arc;
 
 use crate::broker::Broker;
 use crate::persistence::LogManager;
 use argh::FromArgs;
-use ::broker::model::PublishResponse;
+use ::broker::model::{PublishResponse, ReadNextBatchRequest, TopicPartition};
 use broker::Error as BrokerError;
 use coordinator::model::RegisterBrokerRequest;
 use protocol::record::RecordBatch;
 use serde::Serialize;
+use coordinator::Client;
 
 mod broker;
 mod persistence;
@@ -37,25 +37,28 @@ struct Args {
     root_path: String,
 }
 
-#[post("/publish/{topic}/{partition}")]
+#[post("/publish")]
 async fn publish(
     broker: web::Data<Arc<Broker>>,
+    query: web::Query<TopicPartition>,
     record_batch: web::Json<RecordBatch>,
-    path: web::Path<(String, u32)>,
 ) -> impl Responder {
     build_http_response(
-        web::block(move || { broker.publish(&path.0, path.1, record_batch.into_inner()) }).await,
+        web::block(move || { broker.publish(&query.topic, query.partition, record_batch.into_inner()) }).await,
         |base_offset| PublishResponse { base_offset }
     )
 }
 
-#[get("/read-next-batch/{topic}/{partition}/{consumer_group}")]
+// Note this is a post because it modifies some state on the server. Ideally the client should just send an offset to read from, but for now we
+// do not have an operation capable of reinitializing the state of the reader on the broker side if we notice that the request offset is not the 
+// one the reader is currently tracking. For simplicity's sake, we'll keep the stateful API for now (I want to get things to work end-to-end before
+// working on smaller improvements).
+#[post("/read-next-batch")]
 async fn read_next_batch(
     broker: web::Data<Arc<Broker>>,
-    path: web::Path<(String, u32, String)>,
+    request: web::Json<ReadNextBatchRequest>,
 ) -> impl Responder {
-    let (topic, partition, consumer_group) = path.into_inner();
-    println!("topic: {}, partition: {}, consumer_group: {}", topic, partition, consumer_group);
+    let ReadNextBatchRequest { topic, partition, consumer_group } = request.into_inner();
     build_http_response(
         web::block(move || broker.read_next_batch(&topic, partition, consumer_group)).await,
         |record_batch| record_batch
@@ -83,7 +86,7 @@ fn convert_broker_error(e: BrokerError) -> HttpResponse {
 async fn main() -> std::io::Result<()> {
     let args: Args = argh::from_env();
 
-    let coordinator_client = CoordinatorClient::new(args.coordinator_endpoint);
+    let coordinator_client = coordinator::ClientImpl::new(args.coordinator_endpoint);
     coordinator_client.register_broker(RegisterBrokerRequest { host: args.host.clone(), port: args.port })
         .expect("Failed to register broker to the coordinator service");
 

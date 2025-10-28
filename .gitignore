@@ -1,1 +1,5 @@
 /target
+
+# Used as the root folder for the brokers and the coordinator service during local testing. The issue with /tmp is that it's automatically wiped too often,
+# forcing me to recreate test data frequently.
+/test-storage
