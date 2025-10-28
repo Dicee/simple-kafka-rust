@@ -108,7 +108,7 @@ impl Client for ClientImpl {
     }
 
     fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse> {
-        Ok(self.post_and_parse(GET_WRITE_OFFSET, request)?)
+        Ok(self.post_and_parse(GET_READ_OFFSET, request)?)
     }
 
     fn list_brokers(&self, request: ListBrokersRequest) -> Result<ListBrokersResponse> {

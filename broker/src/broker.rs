@@ -8,16 +8,11 @@ use std::io;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use broker::model::RecordBatchWithOffset;
 
 #[cfg(test)]
 #[path = "./broker_test.rs"]
 mod broker_test;
-
-#[derive(Eq, PartialEq, Clone, Debug)]
-pub struct RecordBatchWithOffset {
-    pub base_offset: u64,
-    pub batch: RecordBatch,
-}
 
 pub struct Broker {
     log_manager: Arc<LogManager>, // TODO: try removing this Arc

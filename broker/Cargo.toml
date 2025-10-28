@@ -9,6 +9,7 @@ argh.workspace = true
 coordinator = { path = "../coordinator" }
 mockall.workspace = true
 protocol = { path = "../protocol" }
+serde.workspace = true
 tokio.workspace = true
 walkdir.workspace = true
 

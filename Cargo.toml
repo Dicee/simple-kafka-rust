@@ -3,6 +3,7 @@ resolver = "3"
 members = ["broker", "coordinator", "file_test_utils", "protocol"]
 
 [workspace.dependencies]
+actix-web = "4.11.0"
 argh = "0.1.13"
 assertor = "0.0.4"
 mockall = "0.13.1"

@@ -19,6 +19,11 @@
   have a high cost)
 - use async IO rather than threads with blocking operations
 
+# Scalability
+
+- change the multithreading model in the broker as having one thread per topic/partition for writes, and one per topic/partition/consumer group is a simple model
+  to ensure atomicity, but wouldn't be scalable to a large number of topics/partitions, or would require spreading them across a very large number of brokers
+
 ## Bugs
 
 - move from simple-server to actix-web, as it seems like even in simple use cases simple-server has a bug causing transient issues with the body being empty

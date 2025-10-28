@@ -1,6 +1,7 @@
 use crate::primitives::*;
 use std::io;
 use std::io::{Cursor, Read, Write};
+use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
 #[path="record_test.rs"]
@@ -9,6 +10,7 @@ mod record_test;
 pub const BATCH_METADATA_SIZE: usize = 1 + 8 + 4 + 4;
 
 /// Format inspired (but simplified) from [here](https://kafka.apache.org/documentation/#recordbatch)
+#[derive(Serialize, Deserialize)] // Temporary model, we will not keep the broker API that allows publishing a non-binary format, but it's just much easier to test for now
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct RecordBatch {
     pub protocol_version: u8,
@@ -26,6 +28,7 @@ pub struct RecordBatchMetadata {
 }
 
 /// Format inspired (but simplified) from [here](https://kafka.apache.org/documentation/#record)
+#[derive(Serialize, Deserialize)] // Temporary model, we will not keep the broker API that allows publishing a non-binary format, but it's just much easier to test for now
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct Record {
     pub timestamp: u64,
@@ -34,6 +37,7 @@ pub struct Record {
     pub headers: Vec<Header>,
 }
 
+#[derive(Serialize, Deserialize)] // Temporary model, we will not keep the broker API that allows publishing a non-binary format, but it's just much easier to test for now
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct Header {
     pub key: String,

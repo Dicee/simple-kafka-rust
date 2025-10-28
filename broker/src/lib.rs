@@ -1,4 +1,1 @@
-//! This crate provides all the logic and binaries necessary to run a broker on a node.
-
-mod broker;
-pub(crate) mod persistence;
+pub mod model;
