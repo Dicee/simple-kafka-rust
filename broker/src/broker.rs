@@ -1,13 +1,13 @@
 use crate::broker::Error::{Coordinator, Io, Unexpected};
-use crate::persistence::{AtomicReadAction, IndexedRecord, LogManager, ReadError, RotatingLogReader, WriteError};
+use crate::persistence::indexing::{self, IndexLookupResult};
+use crate::persistence::{AtomicReadAction, AtomicWriteAction, IndexedRecord, LogManager, RotatingAppendOnlyLog, RotatingLogReader};
 use coordinator::client::Client as CoordinatorClient;
 use coordinator::model::{GetReadOffsetRequest, GetWriteOffsetRequest, IncrementWriteOffsetRequest};
-use protocol::record::{deserialize_batch_metadata, read_batch_metadata, read_next_batch, serialize_batch_into, RecordBatch, BATCH_METADATA_SIZE};
+use protocol::record::{deserialize_batch_metadata, read_batch_metadata, read_next_batch, serialize_batch, RecordBatch, BATCH_METADATA_SIZE};
 use std::io;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use crate::persistence::indexing::{self, IndexLookupResult};
 
 #[cfg(test)]
 #[path = "./broker_test.rs"]
@@ -20,7 +20,7 @@ pub struct RecordBatchWithOffset {
 }
 
 pub struct Broker {
-    log_manager: LogManager,
+    log_manager: Arc<LogManager>, // TODO: try removing this Arc
     coordinator_client: Arc<dyn CoordinatorClient>,
 }
 
@@ -33,29 +33,59 @@ pub enum Error {
 }
 
 impl Broker {
-    /// Commits a batch of records to disk and returns the base offset of the batch
-    pub fn publish(&mut self, topic: &str, partition: u32, record_batch: RecordBatch) -> Result<u64, Error> {
-        let message_count = record_batch.records.len();
-        let next_offset = self.coordinator_client.get_write_offset(GetWriteOffsetRequest { topic: topic.to_owned(), partition })?
-            .offset.map(|o| o + 1).unwrap_or(0);
-
-        // Note that adding the offset has to be done by the broker as there may be multiple publishers, and only the broker can do this
-        // while guaranteeing consistency.
-        let mut bytes = Vec::new();
-        bytes.extend(next_offset.to_le_bytes());
-        serialize_batch_into(record_batch, &mut bytes);
-
-        self.log_manager.write_and_commit(topic, partition, next_offset, &bytes)?;
-        self.coordinator_client.increment_write_offset(IncrementWriteOffsetRequest {
-            topic: topic.to_string(),
-            partition,
-            inc: u32::try_from(message_count).unwrap()
-        })?;
-
-        Ok(next_offset)
+    pub fn new(log_manager: Arc<LogManager>, coordinator_client: Arc<dyn CoordinatorClient>) -> Self {
+        Self { log_manager, coordinator_client }
     }
 
-    pub fn read_next_batch(&mut self, topic: &str, partition: u32, consumer_group: String) -> Result<Option<RecordBatchWithOffset>, Error> {
+    /// Serializes and commits a batch of records to disk and returns the base offset of the batch. This method is meant for ease of testing
+    /// at the moment and will be removed later, because serialization is normally performed by the publisher (which isn't written yet!).
+    /// # Errors
+    /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
+    /// - [Error::Io] if the write operation fails due to an IO error
+    /// - [Error::Unexpected] if anything else fails
+    pub fn publish(&self, topic: &str, partition: u32, record_batch: RecordBatch) -> Result<u64, Error> {
+        let message_count = record_batch.records.len();
+        self.publish_raw(topic, partition, serialize_batch(record_batch), message_count as u32)
+    }
+
+    /// Writes and commits to disk the provided bytes and returns the base offset of the batch
+    /// # Errors
+    /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
+    /// - [Error::Io] if the write operation fails due to an IO error
+    /// - [Error::Unexpected] if anything else fails
+    pub fn publish_raw(&self, topic: &str, partition: u32, bytes: Vec<u8>, record_count: u32) -> Result<u64, Error> {
+        self.log_manager.atomic_write(topic, partition, WriteAndCommit {
+            topic: topic.to_owned(),
+            partition,
+            bytes,
+            record_count,
+            coordinator_client: Arc::clone(&self.coordinator_client),
+        })
+    }
+
+    /// Reads and deserializes the next batch for the given topic, partition and consumer group. This method is meant for ease of testing
+    /// at the moment and will be removed later, because deserialization is normally performed by the consumer (which isn't written yet!).
+    /// # Errors
+    /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
+    /// - [Error::Io] if the read operation fails due to an IO error
+    /// - [Error::Unexpected] if anything else fails
+    pub fn read_next_batch(&self, topic: &str, partition: u32, consumer_group: String) -> Result<Option<RecordBatchWithOffset>, Error> {
+        Ok(match self.read_raw_next_batch(topic, partition, consumer_group)? {
+            None => None,
+            Some(IndexedRecord(base_offset, bytes)) => {
+                let record_batch = read_next_batch(&mut Cursor::new(bytes))?;
+                Some(RecordBatchWithOffset { batch: record_batch, base_offset })
+            }
+        })
+    }
+
+    /// Reads, without decoding, the next batch for the given topic, partition and consumer group. This method is meant for ease of testing
+    /// at the moment and will be removed later, because deserialization is normally performed by the consumer (which isn't written yet!).
+    /// # Errors
+    /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
+    /// - [Error::Io] if the read operation fails due to an IO error
+    /// - [Error::Unexpected] if anything else fails
+    pub fn read_raw_next_batch(&self, topic: &str, partition: u32, consumer_group: String) -> Result<Option<IndexedRecord>, Error> {
         let write_offset = self.coordinator_client.get_write_offset(GetWriteOffsetRequest { topic: topic.to_owned(), partition })?.offset;
         let ack_offset = self.coordinator_client.get_read_offset(GetReadOffsetRequest {
             topic: topic.to_owned(),
@@ -63,19 +93,45 @@ impl Broker {
             consumer_group: consumer_group.clone()
         })?.offset;
 
-        let IndexedRecord(base_offset, bytes) = self.log_manager.atomic_read(topic, partition, consumer_group, ReadNextBatch {
+        let indexed_record = self.log_manager.atomic_read(topic, partition, consumer_group, ReadNextBatch {
             write_offset,
             read_ack_offset: ack_offset
         })?;
 
-        Ok(if bytes.is_empty() { None }
+        Ok(if indexed_record.1.is_empty() { None }
         else {
-            let record_batch = read_next_batch(&mut Cursor::new(bytes))?;
-            Some(RecordBatchWithOffset {
-                batch: record_batch,
-                base_offset,
-            })
+            Some(indexed_record)
         })
+    }
+}
+
+struct WriteAndCommit {
+    topic: String,
+    partition: u32,
+    coordinator_client: Arc<dyn CoordinatorClient>,
+    record_count: u32,
+    bytes: Vec<u8>,
+}
+
+impl AtomicWriteAction for WriteAndCommit {
+    fn write_to(&self, log: &mut RotatingAppendOnlyLog) -> Result<u64, Error> {
+        let next_offset = self.coordinator_client.get_write_offset(GetWriteOffsetRequest { topic: self.topic.clone(), partition: self.partition })?
+            .offset.map(|o| o + 1).unwrap_or(0);
+
+        // Note that adding the offset has to be done by the broker as there may be multiple publishers, and only the broker can do this
+        // while guaranteeing consistency.
+
+        log.write_all(next_offset, &next_offset.to_le_bytes())?;
+        log.write_all(next_offset, &self.bytes)?;
+        log.flush()?;
+
+        self.coordinator_client.increment_write_offset(IncrementWriteOffsetRequest {
+            topic: self.topic.clone(),
+            partition: self.partition,
+            inc: self.record_count,
+        })?;
+
+        Ok(next_offset)
     }
 }
 
@@ -85,22 +141,22 @@ struct ReadNextBatch {
 }
 
 impl AtomicReadAction for ReadNextBatch {
-    fn initialize(&self, root_path: &str) -> io::Result<RotatingLogReader> {
-        match self.read_ack_offset {
-            None => RotatingLogReader::open_for_index(root_path.to_owned(), 0),
+    fn initialize(&self, root_path: &str) -> Result<RotatingLogReader, Error> {
+        Ok(match self.read_ack_offset {
+            None => RotatingLogReader::open_for_index(root_path.to_owned(), 0)?,
             Some(ack_offset) => {
                 let record_offset = ack_offset + 1;
                 match indexing::look_up(Path::new(root_path), record_offset)? {
                     // no data written yet so we know the reader must be initialized to the first file with no offset
-                    None => RotatingLogReader::open_for_index(root_path.to_owned(), 0),
+                    None => RotatingLogReader::open_for_index(root_path.to_owned(), 0)?,
                     Some(IndexLookupResult { log_file_path, byte_offset }) =>
-                        open_log_at_record_offset(record_offset, log_file_path, byte_offset)
+                        open_log_at_record_offset(record_offset, log_file_path, byte_offset)?
                 }
             }
-        }
+        })
     }
 
-    fn read_from(&self, reader: &mut RotatingLogReader) -> io::Result<IndexedRecord> {
+    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, Error> {
         let write_offset = match self.write_offset {
             None => return Ok(IndexedRecord(0, vec![])), // no data hsa ever been written
             Some(w) => w,
@@ -154,22 +210,4 @@ impl From<coordinator::client::Error> for Error {
 
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self { Io(e) }
-}
-
-impl From<WriteError> for Error {
-    fn from(err: WriteError) -> Self {
-        match err {
-            WriteError::Io(e) => Io(e),
-            _ => Unexpected(format!("{err:?}"))
-        }
-    }
-}
-
-impl From<ReadError> for Error {
-    fn from(err: ReadError) -> Self {
-        match err {
-            ReadError::Io(e) => Io(e),
-            _ => Unexpected(format!("{err:?}"))
-        }
-    }
 }

@@ -1,10 +1,11 @@
-use std::{io, thread};
-use super::{AtomicReadAction, IndexedRecord, LogManager, MockAtomicReadAction, MockAtomicReadAction_AtomicReadAction, ReadError};
+use super::{AtomicReadAction, AtomicWriteAction, IndexedRecord, LogManager, MockAtomicReadAction, RotatingAppendOnlyLog};
+use crate::broker::Error as BrokerError;
+use crate::persistence::log_reader::RotatingLogReader;
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
 use file_test_utils::{assert_file_has_content, TempTestDir};
-use std::io::{ErrorKind};
+use std::io::ErrorKind;
+use std::thread;
 use std::time::Duration;
-use crate::persistence::log_reader::RotatingLogReader;
 
 const DEFAULT_LOOP_TIMEOUT: Duration = Duration::from_millis(5);
 const GROUP1: &str = "group1";
@@ -79,7 +80,7 @@ fn test_atomic_read() {
 
     let mut read_action = MockAtomicReadAction::new();
 
-    read_action.expect_initialize().returning(|root_path| RotatingLogReader::open_for_index(root_path.to_owned(), 0));
+    read_action.expect_initialize().returning(|root_path| Ok(RotatingLogReader::open_for_index(root_path.to_owned(), 0)?));
     read_action
         .expect_read_from()
         .returning(|log_reader| {
@@ -106,7 +107,7 @@ fn test_read_before_writing_anything() {
     let temp_dir = TempTestDir::create();
     let root_path = format!("{}/topics", temp_dir.path_as_str());
 
-    let mut log_manager = LogManager::new_with_loop_timeout(root_path.clone(), DEFAULT_LOOP_TIMEOUT);
+    let log_manager = LogManager::new_with_loop_timeout(root_path.clone(), DEFAULT_LOOP_TIMEOUT);
 
     // It's empty rather than failing because instantiating the LogManager creates a writer thread, which will create an empty file
     // even before anything has been written.
@@ -124,28 +125,38 @@ fn test_read_past_eof() {
     write_to(&mut log_manager, "topic1", 0, "Hi sir!");
 
     match log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), SingleRead(50)) {
-        Err(ReadError::Io(e)) => assert_eq!(e.kind(), ErrorKind::UnexpectedEof),
+        Err(BrokerError::Io(e)) => assert_eq!(e.kind(), ErrorKind::UnexpectedEof),
         _ => unreachable!(),
     }
 }
 
 fn write_to(log_manager: &mut LogManager, topic: &str, partition: u32, content: &str) {
-    log_manager.write_and_commit(topic, partition, 0, content.as_bytes()).unwrap();
+    log_manager.atomic_write(topic, partition, WriteAndCommit(0, content.as_bytes().to_vec())).unwrap();
 }
 
-fn assert_read_bytes_are(result: Result<IndexedRecord, ReadError>, expected: &str) {
+fn assert_read_bytes_are(result: Result<IndexedRecord, BrokerError>, expected: &str) {
     let actual: &str = &String::from_utf8(result.unwrap().1).unwrap();
     assert_that!(actual).is_equal_to(expected);
+}
+
+struct WriteAndCommit(u64, Vec<u8>);
+
+impl AtomicWriteAction for WriteAndCommit {
+    fn write_to(&self, log: &mut RotatingAppendOnlyLog) -> Result<u64, BrokerError> {
+        log.write_all(self.0, &self.1)?;
+        log.flush()?;
+        Ok(self.0)
+    }
 }
 
 struct SingleRead(usize);
 
 impl AtomicReadAction for SingleRead {
-    fn initialize(&self, root_path: &str) -> io::Result<RotatingLogReader> {
-        RotatingLogReader::open_for_index(root_path.to_owned(), 0)
+    fn initialize(&self, root_path: &str) -> Result<RotatingLogReader, BrokerError> {
+        Ok(RotatingLogReader::open_for_index(root_path.to_owned(), 0)?)
     }
 
-    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, ReadError> {
+    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, BrokerError> {
         Ok(IndexedRecord(0, reader.read(self.0)?))
     }
 }
@@ -153,11 +164,11 @@ impl AtomicReadAction for SingleRead {
 struct SingleSeek(i64);
 
 impl AtomicReadAction for SingleSeek {
-    fn initialize(&self, root_path: &str) -> io::Result<RotatingLogReader> {
-        RotatingLogReader::open_for_index(root_path.to_owned(), 0)
+    fn initialize(&self, root_path: &str) -> Result<RotatingLogReader, BrokerError> {
+        Ok(RotatingLogReader::open_for_index(root_path.to_owned(), 0)?)
     }
     
-    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, ReadError> {
+    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, BrokerError> {
         reader.seek(self.0)?;
         Ok(IndexedRecord(0, vec![]))
     }
@@ -169,7 +180,8 @@ impl AtomicReadAction for SingleSeek {
 /// error). Some of those are possible to trigger with mocking but it would be unpractical because [LogManager] instantiates readers and writers dynamically.
 /// I don't really want to have factories left and right just for testing. Thus, I'll test this handling by calling an internal API.
 mod internal {
-    use crate::persistence::{start_mpsc_request_loop, MpscRequest, ReadError};
+    use crate::persistence::{start_mpsc_request_loop, MpscRequest};
+    use super::BrokerError;
     use assertor::{assert_that, EqualityAssertion};
     use ntest_timeout::timeout;
     use std::io::ErrorKind;
@@ -270,7 +282,7 @@ mod internal {
         let handle = thread::spawn(move || {
             start_mpsc_request_loop(
                 &rx,
-                |_| Err(ReadError::Io(io::Error::new(ErrorKind::UnexpectedEof, "Ohhhhh snap!"))),
+                |_| Err(BrokerError::Io(io::Error::new(ErrorKind::UnexpectedEof, "Ohhhhh snap!"))),
                 loop_timeout,
                 &shutdown_clone,
                 String::from("test loop")
@@ -283,7 +295,7 @@ mod internal {
         tx.send(SimpleRequest { response_tx, message: String::from("Goodbye") }).unwrap();
 
         match response_rx.blocking_recv().unwrap() {
-            Err(ReadError::Io(io_err)) => assert_that!(io_err.kind()).is_equal_to(ErrorKind::UnexpectedEof),
+            Err(BrokerError::Io(io_err)) => assert_that!(io_err.kind()).is_equal_to(ErrorKind::UnexpectedEof),
             _ => unreachable!(),
         }
 
@@ -302,10 +314,10 @@ mod internal {
     #[derive(Debug)]
     struct SimpleRequest {
         message: String,
-        response_tx: oneshot::Sender<Result<String, ReadError>>,
+        response_tx: oneshot::Sender<Result<String, BrokerError>>,
     }
 
-    impl MpscRequest<String, ReadError> for SimpleRequest {
-        fn response_tx(self) -> oneshot::Sender<Result<String, ReadError>> { self.response_tx }
+    impl MpscRequest<String, BrokerError> for SimpleRequest {
+        fn response_tx(self) -> oneshot::Sender<Result<String, BrokerError>> { self.response_tx }
     }
 }

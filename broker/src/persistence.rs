@@ -6,19 +6,20 @@ pub mod indexing;
 mod persistence_test;
 
 pub use log_reader::RotatingLogReader;
+pub use append_only_log::RotatingAppendOnlyLog;
 
-use append_only_log::*;
+use crate::broker::Error as BrokerError;
+use mockall::automock;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
-use std::sync::{atomic, Arc};
+use std::sync::{atomic, Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use std::{io, iter, thread};
-use std::io::Error;
-use std::path::PathBuf;
-use mockall::automock;
 use tokio::sync::oneshot;
 
 const LOG_EXTENSION: &str = "log";
@@ -29,6 +30,9 @@ const MAX_FILE_SIZE_BYTES: u64 = 10 * 1024 * 1024;
 // We don't need to shut down very fast, so we can afford having a slow loop, and it saves CPU cycles. Note
 // that we will still write as soon as a request arrives, we're only waiting when there is no request.
 const LOOP_TIMEOUT: Duration = Duration::from_secs(5);
+
+const WORKER_THREAD_DISCONNECTED: &str = "The channel to the single-threaded worker that performing the read or write task \
+    for this topic/partition(/consumer group) has been disconnected at one end or the other";
 
 /// Simple struct that uniquely identifies a log group (how files are split within a log group is an implementation detail of the [LogManager]).
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
@@ -49,7 +53,7 @@ impl LogKey {
 /// will assume the caller is correct in requesting a specific partition to be written to on the local disk.
 pub struct LogManager {
     root_path: String,
-    log_files: HashMap<LogKey, PartitionLogManager>,
+    log_files: Arc<Mutex<HashMap<LogKey, Arc<PartitionLogManager>>>>,
     loop_timeout: Duration,
     shutdown: Arc<AtomicBool>,
 }
@@ -61,46 +65,37 @@ impl LogManager {
     fn new_with_loop_timeout(root_path: String, loop_timeout: Duration) -> LogManager {
         LogManager {
             root_path,
-            log_files: HashMap::new(),
+            log_files: Arc::new(Mutex::new(HashMap::new())),
             loop_timeout,
             shutdown: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    /// Writes, without committing, arbitrary bytes to a given topic and partition. To prevent potential data loss, [Self::write_and_commit] must be called
-    /// when your business logic needs to ensure the data has been persisted. Similarly to the data layout we chose for [RotatingAppendOnlyLog],
-    /// we'll only allow up to 1000 partitions, which is more than enough for the small scale we will test the project at.
+    /// Atomically performs arbitrary write operations specified by the [AtomicWriteAction] with the guarantee that no other threads will be able to interleave
+    /// any write operation to the same [RotatingAppendOnlyLog] as long as this action is running. Note that similarly to the data layout we chose for
+    /// [RotatingAppendOnlyLog], we'll only allow up to 1000 partitions, which is more than enough for the small scale we will test the project at.
     /// # Errors
-    /// - [WriteError::Io] if an IO error occurs during the write operation
-    /// - [WriteError::WriterThreadDisconnected] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
+    /// - [BrokerError::Io] if an IO error occurs during the write operation
+    /// - [BrokerError::Unexpected] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    pub fn write(&mut self, topic: &str, partition: u32, index: u64, buf: &[u8]) -> Result<(), WriteError> {
-        self.get_or_create_partition_manager(topic, partition, |e| WriteError::Io(e))?.write(index, buf, false)
-    }
-
-    /// Same as [Self::write] but it additionally flushes the data written so far.
-    /// # Errors
-    /// - [WriteError::Io] if an IO error occurs during the write operation
-    /// - [WriteError::WriterThreadDisconnected] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
-    ///   is likely required.
-    pub fn write_and_commit(&mut self, topic: &str, partition: u32, index: u64, buf: &[u8]) -> Result<(), WriteError> {
-        self.get_or_create_partition_manager(topic, partition, |e| WriteError::Io(e))?.write(index, buf, true)
+    pub fn atomic_write(&self, topic: &str, partition: u32, atomic_write: impl AtomicWriteAction) -> Result<u64, BrokerError> {
+        self.get_or_create_partition_manager(topic, partition, |e| BrokerError::Io(e))?.atomic_write(atomic_write)
     }
 
     /// Atomically performs arbitrary read operations specified by the [AtomicReadAction] with the guarantee that no other threads will be able to interleave
     /// any read operation to the same [RotatingLogReader] as long as this action is running.
     /// # Errors
-    /// - [ReadError::Io] if an IO error occurs during the read operation
-    /// - [ReadError::ReaderThreadDisconnected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
+    /// - [BrokerError::Io] if an IO error occurs during the read operation
+    /// - [BrokerError::Unexpected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    pub fn atomic_read(&mut self, topic: &str, partition: u32, consumer_group: String, atomic_read: impl AtomicReadAction) -> Result<IndexedRecord, ReadError> {
-        self.get_or_create_partition_manager(topic, partition, |e| ReadError::Io(e))?.atomic_read(consumer_group, atomic_read)
+    pub fn atomic_read(&self, topic: &str, partition: u32, consumer_group: String, atomic_read: impl AtomicReadAction) -> Result<IndexedRecord, BrokerError> {
+        self.get_or_create_partition_manager(topic, partition, |e| BrokerError::Io(e))?.atomic_read(consumer_group, atomic_read)
     }
 
-    fn get_or_create_partition_manager<F, Err>(&mut self, topic: &str, partition: u32, map_error: F) -> Result<&mut PartitionLogManager, Err>
-    where F: Fn(io::Error) -> Err,
+    fn get_or_create_partition_manager<F, Err>(&self, topic: &str, partition: u32, map_error: F) -> Result<Arc<PartitionLogManager>, Err>
+    where F: Fn(io::Error) -> Err
     {
-        Ok(match self.log_files.entry(LogKey::new(topic, partition)) {
+        Ok(Arc::clone(match self.log_files.lock().unwrap().entry(LogKey::new(topic, partition)) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
                 let log_manager = PartitionLogManager::new(
@@ -109,17 +104,27 @@ impl LogManager {
                     self.loop_timeout,
                     Arc::clone(&self.shutdown),
                 );
-                entry.insert(log_manager.map_err(map_error)?)
+                entry.insert(Arc::new(log_manager.map_err(map_error)?))
             }
-        })
+        }))
     }
 
     pub fn shutdown(self) -> thread::Result<()> {
         self.shutdown.store(true, atomic::Ordering::Relaxed);
-        println!("Shutting down log manager... Waiting for {} partition log managers to shut down", self.log_files.len());
 
-        self.log_files.into_iter()
-            .map(|(_, partition_manager)| partition_manager.shutdown())
+        let log_files = Arc::try_unwrap(self.log_files)
+            .expect("LogManager::shutdown called, but other Arc clones of log_files still exist.")
+            .into_inner()
+            .expect("Mutex poisoned. Partition managers may be in an inconsistent state.");
+
+        println!("Shutting down log manager... Waiting for {} partition log managers to shut down", log_files.len());
+
+        log_files.into_iter()
+            .map(|(_, partition_manager)|
+                Arc::try_unwrap(partition_manager)
+                    .expect("LogManager::shutdown called, but other Arc clones of this PartitionLogManager still exist.")
+                    .shutdown()
+            )
             .fold(Ok(()), |acc, result| if result.is_err() { result } else { acc })
     }
 }
@@ -134,7 +139,7 @@ struct PartitionLogManager {
     root_path: String,
     writer_tx: Sender<WriteRequest>,
     writer_thread: JoinHandle<()>,
-    consumers: HashMap<String, ConsumerManager>,
+    consumers: Mutex<HashMap<String, ConsumerManager>>,
     loop_timeout: Duration,
     shutdown: Arc<AtomicBool>,
 }
@@ -166,33 +171,35 @@ impl PartitionLogManager {
             writer_thread,
             shutdown,
             loop_timeout,
-            consumers: HashMap::new()
+            consumers: Mutex::new(HashMap::new()),
         })
     }
 
-    /// Writes the bytes, optionally flushing them out if requested.
+    /// Atomically performs arbitrary write operations specified by the [AtomicWriteAction] with the guarantee that no other threads will be able to interleave
+    /// any write operation to the same [RotatingAppendOnlyLog] as long as this action is running.
     /// # Errors
-    /// - [WriteError::Io] if an IO error occurs during the write operation
-    /// - [WriteError::WriterThreadDisconnected] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
+    /// - [BrokerError::Io] if an IO error occurs during the write operation
+    /// - [BrokerError::Unexpected] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    fn write(&self, index: u64, bytes: &[u8], flush: bool) -> Result<(), WriteError> {
+    fn atomic_write(&self, atomic_write: impl AtomicWriteAction) -> Result<u64, BrokerError> {
         let (response_tx, response_rx) = oneshot::channel();
 
-        let send_result = self.writer_tx.send(WriteRequest { index, bytes: Arc::from(bytes), flush, response_tx });
-        if send_result.is_err() { return Err(WriteError::WriterThreadDisconnected) }
+        let send_result = self.writer_tx.send(WriteRequest { atomic_write: Box::new(atomic_write), response_tx });
+        if send_result.is_err() { return Err(new_worker_thread_disconnected_error()) }
 
-        response_rx.blocking_recv().unwrap_or_else(|_| Err(WriteError::WriterThreadDisconnected))
+        response_rx.blocking_recv().unwrap_or_else(|_| Err(new_worker_thread_disconnected_error()))
     }
 
     /// Atomically performs arbitrary read operations specified by the [AtomicReadAction] with the guarantee that no other threads will be able to interleave
     /// any read operation to the same [RotatingLogReader] as long as this action is running.
     /// # Errors
-    /// - [ReadError::Io] if an IO error occurs during the read operation
-    /// - [ReadError::ReaderThreadDisconnected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
+    /// - [BrokerError::Io] if an IO error occurs during the read operation
+    /// - [BrokerError::Unexpected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    fn atomic_read(&mut self, consumer_group: String, atomic_action: impl AtomicReadAction) -> Result<IndexedRecord, ReadError> {
+    fn atomic_read(&self, consumer_group: String, atomic_action: impl AtomicReadAction) -> Result<IndexedRecord, BrokerError> {
         let atomic_action = Box::new(atomic_action);
-        let consumer_manager = match self.consumers.entry(consumer_group.clone()) {
+        let mut consumers_guard = self.consumers.lock().unwrap();
+        let consumer_manager = match consumers_guard.entry(consumer_group.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
                 let (reader_tx, reader_rx) = std::sync::mpsc::channel();
@@ -211,19 +218,26 @@ impl PartitionLogManager {
 
         let (response_tx, response_rx) = oneshot::channel();
         let send_result = consumer_manager.reader_tx.send(ReadRequest { atomic_action, response_tx });
-        if send_result.is_err() { return Err(ReadError::ReaderThreadDisconnected) }
+        if send_result.is_err() { return Err(new_worker_thread_disconnected_error()) }
 
-        response_rx.blocking_recv().unwrap_or_else(|_| Err(ReadError::ReaderThreadDisconnected))
+        response_rx.blocking_recv().unwrap_or_else(|_| Err(new_worker_thread_disconnected_error()))
     }
 
     fn shutdown(self) -> thread::Result<()> {
+        let consumers = self.consumers.into_inner().expect("Mutex poisoned. This partition manager may be in an inconsistent state.");
         println!("Shutting down partition under root path {}... Waiting for {} reader(s) and 1 writer to shut down.",
-                 self.root_path, self.consumers.len());
+                 self.root_path, consumers.len());
 
-        self.consumers.into_iter()
+        consumers.into_iter()
             .map(|(_, consumer_manager)| consumer_manager.reader_thread.join())
             .chain(iter::once(self.writer_thread.join()))
             .fold(Ok(()), |acc, result| if result.is_err() { result } else { acc })
+    }
+}
+
+impl Debug for PartitionLogManager {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("PartitionLogManager(topic={}, partition={})", self.topic, self.partition))
     }
 }
 
@@ -232,16 +246,18 @@ trait MpscRequest<Res, Err> {
 }
 
 struct WriteRequest {
-    index: u64,
-    bytes: Arc<[u8]>,
-    flush: bool,
-    response_tx: oneshot::Sender<Result<(), WriteError>>,
+    atomic_write: Box<dyn AtomicWriteAction>,
+    response_tx: oneshot::Sender<Result<u64, BrokerError>>,
 }
 
-#[derive(Debug)]
-pub enum WriteError {
-    WriterThreadDisconnected,
-    Io(io::Error),
+/// This trait allows to inject read external logic with the guarantee that the provided [RotatingLogReader] is only available on a single thread,
+/// and no other thread can make any operation until [AtomicReadAction::read_from] has completed. This means that implementations of this trait can
+/// make any number of accesses to the disk without worrying about another producer thread sending a read request in the middle and producing unexpected
+/// outcomes. We opted for this design to decouple [LogManager] from the protocol layer. We wanted it to remain purely about low-level IO handling, and
+/// not requiring any knowledge about the binary format. That way, only minimal changes (if any) would be required to this code even if we entirely changed
+/// our approach for the binary format.
+pub trait AtomicWriteAction : Send + 'static {
+    fn write_to(&self, log: &mut RotatingAppendOnlyLog) -> Result<u64, BrokerError>;
 }
 
 /// Handles the resources and logic to continuously write to a rotating log file for a single partition.
@@ -254,20 +270,18 @@ struct PartitionLogWriter {
 impl PartitionLogWriter {
     fn start_write_loop(&mut self, loop_timeout: Duration, description: String) {
         start_mpsc_request_loop(&self.write_requests, |request| {
-            let mut result = self.log.write_all(request.index, &request.bytes);
-            if result.is_ok() && request.flush { result = self.log.flush() }
-            result.map_err(|e| WriteError::Io(e))
+            request.atomic_write.write_to(&mut self.log)
         }, loop_timeout, &self.shutdown, description);
     }
 }
 
-impl MpscRequest<(), WriteError> for WriteRequest {
-    fn response_tx(self) -> oneshot::Sender<Result<(), WriteError>> { self.response_tx }
+impl MpscRequest<u64, BrokerError> for WriteRequest {
+    fn response_tx(self) -> oneshot::Sender<Result<u64, BrokerError>> { self.response_tx }
 }
 
 struct ReadRequest {
     atomic_action: Box<dyn AtomicReadAction>,
-    response_tx: oneshot::Sender<Result<IndexedRecord, ReadError>>,
+    response_tx: oneshot::Sender<Result<IndexedRecord, BrokerError>>,
 }
 
 /// This trait allows to inject read external logic with the guarantee that the provided [RotatingLogReader] is only available on a single thread,
@@ -278,24 +292,13 @@ struct ReadRequest {
 /// our approach for the binary format.
 #[automock]
 pub trait AtomicReadAction : Send + 'static {
-    fn initialize(&self, root_path: &str) -> io::Result<RotatingLogReader>;
+    fn initialize(&self, root_path: &str) -> Result<RotatingLogReader, BrokerError>;
 
-    fn read_from(&self, reader: &mut RotatingLogReader) -> io::Result<IndexedRecord>;
+    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, BrokerError>;
 }
 
 #[derive(Debug)]
 pub struct IndexedRecord(pub u64, pub Vec<u8>);
-
-#[derive(Debug)]
-pub enum ReadError {
-    ReaderThreadDisconnected,
-    Io(io::Error),
-}
-
-impl From<io::Error> for ReadError {
-    fn from(e: Error) -> Self { ReadError::Io(e) }
-}
-
 
 /// Handles the resources and logic to continuously read from a rotating log file for a single partition.
 struct PartitionLogReader {
@@ -306,14 +309,13 @@ struct PartitionLogReader {
 
 impl PartitionLogReader {
     fn start_read_loop(&mut self, loop_timeout: Duration, description: String) {
-        start_mpsc_request_loop(&self.read_requests, |request| {
-            request.atomic_action.read_from(&mut self.reader).map_err(|e| ReadError::Io(e))
-        }, loop_timeout, &self.shutdown, description);
+        start_mpsc_request_loop(&self.read_requests, |request| request.atomic_action.read_from(&mut self.reader),
+            loop_timeout, &self.shutdown, description);
     }
 }
 
-impl MpscRequest<IndexedRecord, ReadError> for ReadRequest {
-    fn response_tx(self) -> oneshot::Sender<Result<IndexedRecord, ReadError>> { self.response_tx }
+impl MpscRequest<IndexedRecord, BrokerError> for ReadRequest {
+    fn response_tx(self) -> oneshot::Sender<Result<IndexedRecord, BrokerError>> { self.response_tx }
 }
 
 fn start_mpsc_request_loop<Req, Res, Err, F>(
@@ -357,4 +359,8 @@ fn get_log_name(first_index: u64) -> String {
 
 fn get_index_name(first_index: u64) -> String {
     format!("{first_index:05}.{INDEX_EXTENSION}")
+}
+
+fn new_worker_thread_disconnected_error() -> BrokerError {
+    BrokerError::Unexpected(WORKER_THREAD_DISCONNECTED.to_owned())
 }

@@ -1,13 +1,12 @@
 use crate::broker::Error::Coordinator;
-use crate::broker::{Broker, RecordBatchWithOffset};
-use crate::persistence::LogManager;
+use crate::broker::{Broker, Error, RecordBatchWithOffset};
+use crate::persistence::{AtomicWriteAction, LogManager, RotatingAppendOnlyLog};
 use assertor::{assert_that, EqualityAssertion, OptionAssertion, ResultAssertion};
 use coordinator::client::{Client as CoordinatorClient, Client, MockClient as MockCoordinatorClient};
 use coordinator::mock::DummyCoordinatorClient;
 use coordinator::model::*;
 use file_test_utils::TempTestDir;
 use protocol::record::{serialize_batch_into, Header, Record, RecordBatch};
-use std::io::ErrorKind;
 use std::sync::Arc;
 
 const TOPIC: &str = "chess-news";
@@ -18,10 +17,7 @@ const CONSUMER_GROUP: &str = "danya-fans";
 fn test_serialization_round_trip_from_first_offset() {
     let temp_dir = TempTestDir::create();
     let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
-    let mut broker = Broker {
-        log_manager: LogManager::new(temp_dir.path_as_str().to_owned()),
-        coordinator_client: Arc::clone(&coordinator_client),
-    };
+    let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp_1 = 0;
     let base_timestamp_2 = 17;
@@ -59,11 +55,7 @@ fn test_publish_write_offset_not_committed_if_failure_coordinator_failure() {
     coordinator_client.expect_increment_write_offset().never();
 
     let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(coordinator_client);
-
-    let mut broker = Broker {
-        log_manager: LogManager::new(temp_dir.path_as_str().to_owned()),
-        coordinator_client: Arc::clone(&coordinator_client),
-    };
+    let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp = 15;
     let batch = new_record_batch(base_timestamp, vec![new_record(base_timestamp, 1)]);
@@ -77,10 +69,7 @@ fn test_publish_write_offset_not_committed_if_failure_coordinator_failure() {
 fn test_read_next_batch_initialize_from_exact_base_offset() {
     let temp_dir = TempTestDir::create();
     let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
-    let mut broker = Broker {
-        log_manager: LogManager::new(temp_dir.path_as_str().to_owned()),
-        coordinator_client: Arc::clone(&coordinator_client),
-    };
+    let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp_1 = 0;
     let base_timestamp_2 = 17;
@@ -111,10 +100,7 @@ fn test_read_next_batch_initialize_from_exact_base_offset() {
 fn test_read_next_batch_initialize_with_offset_within_a_batch() {
     let temp_dir = TempTestDir::create();
     let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
-    let mut broker = Broker {
-        log_manager: LogManager::new(temp_dir.path_as_str().to_owned()),
-        coordinator_client: Arc::clone(&coordinator_client),
-    };
+    let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp_1 = 0;
     let base_timestamp_2 = 17;
@@ -145,10 +131,7 @@ fn test_read_next_batch_initialize_with_offset_within_a_batch() {
 fn test_read_next_batch_initialize_with_offset_at_the_end_of_a_batch() {
     let temp_dir = TempTestDir::create();
     let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
-    let mut broker = Broker {
-        log_manager: LogManager::new(temp_dir.path_as_str().to_owned()),
-        coordinator_client: Arc::clone(&coordinator_client),
-    };
+    let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp_1 = 0;
     let base_timestamp_2 = 17;
@@ -185,10 +168,7 @@ fn test_read_next_batch_initialize_with_offset_at_the_end_of_a_batch() {
 fn test_read_next_batch_initialize_before_any_data_is_written() {
     let temp_dir = TempTestDir::create();
     let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
-    let mut broker = Broker {
-        log_manager: LogManager::new(temp_dir.path_as_str().to_owned()),
-        coordinator_client: Arc::clone(&coordinator_client),
-    };
+    let broker = new_broker(&temp_dir, &coordinator_client);
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
         .has_ok(None);
@@ -208,10 +188,7 @@ fn test_read_next_batch_initialize_before_any_data_is_written() {
 fn test_read_next_batch_initialize_while_first_batch_is_being_written() {
     let temp_dir = TempTestDir::create();
     let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
-    let mut broker = Broker {
-        log_manager: LogManager::new(temp_dir.path_as_str().to_owned()),
-        coordinator_client: Arc::clone(&coordinator_client),
-    };
+    let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp = 14;
     let batch = new_record_batch(base_timestamp, vec![new_record(base_timestamp, 1)]);
@@ -221,13 +198,13 @@ fn test_read_next_batch_initialize_while_first_batch_is_being_written() {
     serialize_batch_into(batch.clone(), &mut bytes);
 
     // simulate an unclean write, with only part of the data flushed to disk
-    let mut log_manager = LogManager::new(temp_dir.path_as_str().to_owned());
-    log_manager.write_and_commit(TOPIC, PARTITION, 0, &bytes[0..13]).unwrap();
+    let log_manager = LogManager::new(temp_dir.path_as_str().to_owned());
+    log_manager.atomic_write(TOPIC, PARTITION, WriteAndCommit(0, bytes[0..13].to_vec())).unwrap();
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
         .has_ok(None);
 
-    log_manager.write_and_commit(TOPIC, PARTITION, 0, &bytes[13..]).unwrap();
+    log_manager.atomic_write(TOPIC, PARTITION, WriteAndCommit(0, bytes[13..].to_vec())).unwrap();
     coordinator_client.increment_write_offset(IncrementWriteOffsetRequest {
         topic: TOPIC.to_owned(),
         partition: PARTITION,
@@ -245,10 +222,7 @@ fn test_read_next_batch_initialize_while_first_batch_is_being_written() {
 fn test_read_next_batch_while_a_batch_is_being_written() {
     let temp_dir = TempTestDir::create();
     let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
-    let mut broker = Broker {
-        log_manager: LogManager::new(temp_dir.path_as_str().to_owned()),
-        coordinator_client: Arc::clone(&coordinator_client),
-    };
+    let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp_1 = 14;
     let base_timestamp_2 = 45;
@@ -269,8 +243,8 @@ fn test_read_next_batch_while_a_batch_is_being_written() {
     serialize_batch_into(batch_2.clone(), &mut bytes);
 
     // simulate an unclean write, with only part of the data flushed to disk
-    let mut log_manager = LogManager::new(temp_dir.path_as_str().to_owned());
-    log_manager.write_and_commit(TOPIC, PARTITION, 0, &bytes[0..13]).unwrap();
+    let log_manager = LogManager::new(temp_dir.path_as_str().to_owned());
+    log_manager.atomic_write(TOPIC, PARTITION, WriteAndCommit(0, bytes[0..13].to_vec())).unwrap();
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
         .has_ok(Some(RecordBatchWithOffset { base_offset: 0, batch: batch_1 }));
@@ -278,7 +252,7 @@ fn test_read_next_batch_while_a_batch_is_being_written() {
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
         .has_ok(None);
 
-    log_manager.write_and_commit(TOPIC, PARTITION, 0, &bytes[13..]).unwrap();
+    log_manager.atomic_write(TOPIC, PARTITION, WriteAndCommit(0, bytes[13..].to_vec())).unwrap();
     coordinator_client.increment_write_offset(IncrementWriteOffsetRequest {
         topic: TOPIC.to_owned(),
         partition: PARTITION,
@@ -319,5 +293,22 @@ fn new_record(base_timestamp: u64, index: u64) -> Record {
             value: format!("value-{index}"),
         }],
         timestamp: base_timestamp + index,
+    }
+}
+
+fn new_broker(temp_dir: &TempTestDir, coordinator_client: &Arc<dyn Client>) -> Broker {
+    Broker {
+        log_manager: Arc::new(LogManager::new(temp_dir.path_as_str().to_owned())),
+        coordinator_client: Arc::clone(&coordinator_client),
+    }
+}
+
+struct WriteAndCommit(u64, Vec<u8>);
+
+impl AtomicWriteAction for WriteAndCommit {
+    fn write_to(&self, log: &mut RotatingAppendOnlyLog) -> Result<u64, Error> {
+        log.write_all(self.0, &self.1)?;
+        log.flush()?;
+        Ok(self.0)
     }
 }

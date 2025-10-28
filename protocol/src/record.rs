@@ -41,7 +41,7 @@ pub struct Header {
 }
 
 /// Serializes the batch in binary format into a new vector and returns it
-fn serialize_batch(batch: RecordBatch) -> Vec<u8> {
+pub fn serialize_batch(batch: RecordBatch) -> Vec<u8> {
     let mut bytes = Vec::new();
     serialize_batch_into(batch, &mut bytes);
     bytes
