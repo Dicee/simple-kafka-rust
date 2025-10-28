@@ -1,7 +1,7 @@
 use super::*;
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
 use file_test_utils::TempTestFile;
-use crate::dao::InvalidOffset::{NoDataWritten, TooLarge};
+use crate::dao::InvalidOffset::{NoDataWritten, TooLarge, TooSmall};
 
 const TOPIC_NAME: &str = "topic";
 const PARTITION: u32 = 36;
@@ -51,11 +51,12 @@ fn test_inc_write_offset_by() {
 
     let inc1 = 5;
     dao.inc_write_offset_by(TOPIC_NAME, PARTITION, inc1).unwrap();
-    assert_that!(dao.get_write_offset(TOPIC_NAME, PARTITION)).has_ok(Some(inc1 as u64));
+    // the first time, we increment by offset - 1 since 0 is the first offset
+    assert_that!(dao.get_write_offset(TOPIC_NAME, PARTITION)).has_ok(Some(inc1 as u64 - 1));
 
     let inc2 = 22;
     dao.inc_write_offset_by(TOPIC_NAME, PARTITION, inc2).unwrap();
-    assert_that!(dao.get_write_offset(TOPIC_NAME, PARTITION)).has_ok(Some((inc1 + inc2) as u64));
+    assert_that!(dao.get_write_offset(TOPIC_NAME, PARTITION)).has_ok(Some((inc1 + inc2 - 1) as u64));
 }
 
 #[test]
@@ -125,11 +126,11 @@ fn test_ack_read_offset_no_offset_yet() {
     dao.inc_write_offset_by(TOPIC_NAME, PARTITION, offset1 as u32).unwrap();
     dao.inc_write_offset_by(TOPIC_NAME, PARTITION + 1, offset2 as u32).unwrap();
 
-    dao.ack_read_offset(TOPIC_NAME, PARTITION, CONSUMER_GROUP, offset1).unwrap();
-    dao.ack_read_offset(TOPIC_NAME, PARTITION + 1, CONSUMER_GROUP, offset2).unwrap();
+    dao.ack_read_offset(TOPIC_NAME, PARTITION, CONSUMER_GROUP, offset1 - 1).unwrap();
+    dao.ack_read_offset(TOPIC_NAME, PARTITION + 1, CONSUMER_GROUP, offset2 - 1).unwrap();
 
-    assert_that!(dao.get_read_offset(TOPIC_NAME, PARTITION, CONSUMER_GROUP)).has_ok(Some(offset1));
-    assert_that!(dao.get_read_offset(TOPIC_NAME, PARTITION + 1, CONSUMER_GROUP)).has_ok(Some(offset2));
+    assert_that!(dao.get_read_offset(TOPIC_NAME, PARTITION, CONSUMER_GROUP)).has_ok(Some(offset1 - 1));
+    assert_that!(dao.get_read_offset(TOPIC_NAME, PARTITION + 1, CONSUMER_GROUP)).has_ok(Some(offset2 - 1));
 }
 
 #[test]
@@ -146,8 +147,8 @@ fn test_ack_read_offset_overwrites_offset() {
     dao.ack_read_offset(TOPIC_NAME, PARTITION, CONSUMER_GROUP, offset1).unwrap();
     assert_that!(dao.get_read_offset(TOPIC_NAME, PARTITION, CONSUMER_GROUP)).has_ok(Some(offset1));
 
-    dao.ack_read_offset(TOPIC_NAME, PARTITION, CONSUMER_GROUP, offset2).unwrap();
-    assert_that!(dao.get_read_offset(TOPIC_NAME, PARTITION, CONSUMER_GROUP)).has_ok(Some(offset2));
+    dao.ack_read_offset(TOPIC_NAME, PARTITION, CONSUMER_GROUP, offset2 - 2).unwrap();
+    assert_that!(dao.get_read_offset(TOPIC_NAME, PARTITION, CONSUMER_GROUP)).has_ok(Some(offset2 - 2));
 }
 
 #[test]
@@ -190,12 +191,29 @@ fn test_ack_read_offset_exceeds_write_offset() {
 
     let offset = 5;
     dao.create_topic(TOPIC_NAME, 64).unwrap();
-    dao.inc_write_offset_by(TOPIC_NAME, PARTITION, (offset - 1) as u32).unwrap();
+    dao.inc_write_offset_by(TOPIC_NAME, PARTITION, offset as u32).unwrap();
 
     let topic = String::from(TOPIC_NAME);
     assert_that!(dao.ack_read_offset(&topic, PARTITION, CONSUMER_GROUP, offset))
         .has_err(InvalidReadOffset(TooLarge { max_offset: 4, invalid_offset: offset }));
 }
+
+#[test]
+fn test_ack_read_offset_less_than_read_offset() {
+    let temp_file = TempTestFile::create();
+    let dao = new_dao(&temp_file);
+
+    let offset = 5;
+    dao.create_topic(TOPIC_NAME, 64).unwrap();
+    dao.inc_write_offset_by(TOPIC_NAME, PARTITION, offset as u32).unwrap();
+    dao.ack_read_offset(TOPIC_NAME, PARTITION, CONSUMER_GROUP, offset - 1).unwrap();
+
+    let topic = String::from(TOPIC_NAME);
+    let invalid_offset = offset - 2;
+    assert_that!(dao.ack_read_offset(&topic, PARTITION, CONSUMER_GROUP, invalid_offset))
+        .has_err(InvalidReadOffset(TooSmall { min_offset: 4, invalid_offset }));
+}
+
 
 #[test]
 fn test_get_read_offset_no_offset_yet() {

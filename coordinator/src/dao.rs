@@ -62,6 +62,7 @@ pub enum Error {
 #[derive(PartialEq, Debug)]
 pub enum InvalidOffset {
     TooLarge { max_offset: u64, invalid_offset: u64 },
+    TooSmall { min_offset: u64, invalid_offset: u64 },
     NoDataWritten,
 }
 
@@ -133,7 +134,7 @@ impl MetadataAndStateDao {
 
         let query =
             "INSERT INTO write_offsets (topic, partition, offset)
-            VALUES (:topic, :partition, :inc)
+            VALUES (:topic, :partition, :inc - 1)
             ON CONFLICT (topic, partition)
             DO UPDATE SET offset = offset + :inc;";
 
@@ -176,10 +177,13 @@ impl MetadataAndStateDao {
         // was too large. Indeed, the monotonic nature of the write offset makes it impossible that it's small enough, and
         // then becomes too large by the time we write the read offset.
         let write_offset = self.get_write_offset(topic, partition)?;
+        let read_offset = self.get_read_offset(topic, partition, consumer_group)?;
         if let Some(max_offset) = write_offset && offset > max_offset {
             return Err(InvalidReadOffset(InvalidOffset::TooLarge { max_offset, invalid_offset: offset }));
         } else if write_offset.is_none() {
             return Err(InvalidReadOffset(InvalidOffset::NoDataWritten));
+        } else if let Some(read_offset) = read_offset && read_offset > offset {
+            return Err(InvalidReadOffset(InvalidOffset::TooSmall { min_offset: read_offset, invalid_offset: offset }));
         }
 
         let query=
@@ -262,12 +266,14 @@ impl std::fmt::Display for Error {
         let message = match self {
             TopicAlreadyExists(topic) => &format!("Topic already exists: {topic}"),
             TopicNotFound(topic) => &format!("Topic not found: {topic}"),
-            InvalidReadOffset(InvalidOffset::NoDataWritten) => "Invalid read offset: no data written has been written yet",
             Internal(message) => &format!("Internal error: {message}"),
             OutOfRangePartition { topic, invalid_partition} =>
                 &format!("Invalid partition {invalid_partition} for topic {}, cannot exceed {}", topic.name, topic.partition_count),
+            InvalidReadOffset(InvalidOffset::NoDataWritten) => "Invalid read offset: no data written has been written yet",
             InvalidReadOffset(InvalidOffset::TooLarge { max_offset, invalid_offset }) =>
                 &format!("Invalid read offset {invalid_offset}: it exceeds the maximum written offset of {max_offset}."),
+            InvalidReadOffset(InvalidOffset::TooSmall{ min_offset, invalid_offset }) =>
+                &format!("Invalid read offset {invalid_offset}: cannot rewind behind current ack offset {min_offset}."),
         };
         formatter.write_str(message)
     }
