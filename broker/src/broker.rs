@@ -153,7 +153,7 @@ impl AtomicReadAction for ReadNextBatch {
 
     fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, Error> {
         let write_offset = match self.write_offset {
-            None => return Ok(IndexedRecord(0, vec![])), // no data hsa ever been written
+            None => return Ok(IndexedRecord(0, vec![])), // no data has ever been written
             Some(w) => w,
         };
 

@@ -83,7 +83,7 @@ fn convert_broker_error(e: BrokerError) -> HttpResponse {
 async fn main() -> std::io::Result<()> {
     let args: Args = argh::from_env();
 
-    let coordinator_client = CoordinatorClient::new(args.coordinator_endpoint, false);
+    let coordinator_client = CoordinatorClient::new(args.coordinator_endpoint);
     coordinator_client.register_broker(RegisterBrokerRequest { host: args.host.clone(), port: args.port })
         .expect("Failed to register broker to the coordinator service");
 

@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 actix-web.workspace = true
 argh.workspace = true
+client_utils = { path = "../client_utils" }
 linked_hash_set = "0.1.5"
 mockall.workspace = true
 rusqlite = {version = "0.37.0", features = ["bundled"]}

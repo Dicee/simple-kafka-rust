@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use crate::model::*;
+use client_utils::Result;
 
 pub struct DummyCoordinatorClient {
     pub write_offsets: Mutex<HashMap<TopicPartition, u64>>,
@@ -15,12 +16,12 @@ impl DummyCoordinatorClient {
 }
 
 impl crate::client::Client for DummyCoordinatorClient {
-    fn create_topic(&self, request: CreateTopicRequest) -> crate::client::Result<()> { unimplemented!() }
-    fn get_topic(&self, request: GetTopicRequest) -> crate::client::Result<GetTopicResponse> { unimplemented!() }
-    fn list_brokers(&self) -> crate::client::Result<ListBrokersResponse> { unimplemented!() }
-    fn register_broker(&self, request: RegisterBrokerRequest) -> crate::client::Result<()> { unimplemented!() }
+    fn create_topic(&self, request: CreateTopicRequest) -> Result<()> { unimplemented!() }
+    fn get_topic(&self, request: GetTopicRequest) -> Result<GetTopicResponse> { unimplemented!() }
+    fn list_brokers(&self) -> Result<ListBrokersResponse> { unimplemented!() }
+    fn register_broker(&self, request: RegisterBrokerRequest) -> Result<()> { unimplemented!() }
 
-    fn increment_write_offset(&self, request: IncrementWriteOffsetRequest) -> crate::client::Result<()> {
+    fn increment_write_offset(&self, request: IncrementWriteOffsetRequest) -> Result<()> {
         let mut write_offsets = self.write_offsets.lock().unwrap();
         write_offsets
             .entry(TopicPartition::new(request.topic, request.partition))
@@ -30,12 +31,12 @@ impl crate::client::Client for DummyCoordinatorClient {
         Ok(())
     }
 
-    fn get_write_offset(&self, request: GetWriteOffsetRequest) -> crate::client::Result<GetWriteOffsetResponse> {
+    fn get_write_offset(&self, request: GetWriteOffsetRequest) -> Result<GetWriteOffsetResponse> {
         let write_offsets = self.write_offsets.lock().unwrap();
         Ok(GetWriteOffsetResponse { offset: write_offsets.get(&TopicPartition::new(request.topic, request.partition)).copied() })
     }
 
-    fn ack_read_offset(&self, request: AckReadOffsetRequest) -> crate::client::Result<()> {
+    fn ack_read_offset(&self, request: AckReadOffsetRequest) -> Result<()> {
         let mut read_offsets = self.read_offsets.lock().unwrap();
         let read_offset = read_offsets
             .entry(TopicPartitionConsumer::new(request.topic, request.partition, request.consumer_group))
@@ -45,7 +46,7 @@ impl crate::client::Client for DummyCoordinatorClient {
         Ok(())
     }
 
-    fn get_read_offset(&self, request: GetReadOffsetRequest) -> crate::client::Result<GetReadOffsetResponse> {
+    fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse> {
         let read_offsets = self.read_offsets.lock().unwrap();
         let key = TopicPartitionConsumer::new(request.topic, request.partition, request.consumer_group);
         Ok(GetReadOffsetResponse { offset: read_offsets.get(&key).copied() })
