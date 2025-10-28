@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+actix-web.workspace = true
 argh.workspace = true
 linked_hash_set = "0.1.5"
 mockall.workspace = true
@@ -12,7 +13,6 @@ r2d2 = "0.8.10"
 r2d2_sqlite = "0.31.0"
 serde.workspace = true
 serde_json.workspace = true
-simple-server.workspace = true
 ureq.workspace = true
 
 [dev-dependencies]

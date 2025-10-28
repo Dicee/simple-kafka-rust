@@ -6,7 +6,7 @@ use serde_json;
 use ureq;
 use ureq::config::Config;
 use ureq::http::Response;
-use ureq::{Agent, Body};
+use ureq::{Agent, Body, SendBody};
 
 #[cfg(test)]
 #[path = "./client_test.rs"]
@@ -27,8 +27,8 @@ pub trait Client : Send + Sync {
     fn get_write_offset(&self, request: GetWriteOffsetRequest) -> Result<GetWriteOffsetResponse>;
     fn ack_read_offset(&self, request: AckReadOffsetRequest) -> Result<()>;
     fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse>;
-    fn list_brokers(&self, request: ListBrokersRequest) -> Result<ListBrokersResponse>;
     fn register_broker(&self, request: RegisterBrokerRequest) -> Result<()>;
+    fn list_brokers(&self) -> Result<ListBrokersResponse>;
 }
 
 pub struct ClientImpl {
@@ -58,21 +58,21 @@ impl ClientImpl {
         }
     }
 
-    fn post_and_parse<Req, Res>(&self, api: &str, request: Req) -> Result<Res>
-    where
-        Req: Serialize,
-        for<'de> Res: Deserialize<'de>,
-    {
-        let mut response = self.post(api, request)?;
-        let body = response.body_mut().read_to_string()?;
+    fn get<Res>(&self, api: &str) -> Result<Res> where for<'de> Res: Deserialize<'de> {
+        let uri = format!("{}{api}", self.url_base);
+        let mut response = self.http_client.get(&uri)?;
 
-        Ok(serde_json::from_str(&body)?)
+        if !response.status().is_success() {
+            Err(Api(response.body_mut().read_to_string()?))
+        } else {
+            let body = response.body_mut().read_to_string()?;
+            Ok(serde_json::from_str(&body)?)
+        }
     }
 
     fn post<Req: Serialize>(&self, api: &str, request: Req) -> Result<Response<Body>> {
         let uri = format!("{}{api}", self.url_base);
-        let body = serde_json::to_string(&request)?;
-        let mut response = self.http_client.post(&uri, &body)?;
+        let mut response = self.http_client.post(&uri, SendBody::from_json(&request)?)?;
 
         if !response.status().is_success() {
             Err(Api(response.body_mut().read_to_string()?))
@@ -89,8 +89,7 @@ impl Client for ClientImpl {
     }
 
     fn get_topic(&self, request: GetTopicRequest) -> Result<GetTopicResponse> {
-        // see TODO.md (improvements) on why I'm using PUT for a read-only operation
-        Ok(self.post_and_parse(GET_TOPIC, request)?)
+        Ok(self.get(&format!("{TOPICS}/{}", request.name))?)
     }
 
     fn increment_write_offset(&self, request: IncrementWriteOffsetRequest) -> Result<()> {
@@ -99,7 +98,7 @@ impl Client for ClientImpl {
     }
 
     fn get_write_offset(&self, request: GetWriteOffsetRequest) -> Result<GetWriteOffsetResponse> {
-        Ok(self.post_and_parse(GET_WRITE_OFFSET, request)?)
+        Ok(self.get(&format!("{TOPICS}/{}/{PARTITIONS}/{}/{WRITE_OFFSET}", request.topic, request.partition))?)
     }
 
     fn ack_read_offset(&self, request: AckReadOffsetRequest) -> Result<()> {
@@ -108,22 +107,24 @@ impl Client for ClientImpl {
     }
 
     fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse> {
-        Ok(self.post_and_parse(GET_READ_OFFSET, request)?)
-    }
-
-    fn list_brokers(&self, request: ListBrokersRequest) -> Result<ListBrokersResponse> {
-        Ok(self.post_and_parse(REGISTER_BROKER, request)?)
+        Ok(self.get(&format!("{TOPICS}/{}/{PARTITIONS}/{}/{CONSUMER_GROUPS}/{}/{READ_OFFSET}",
+            request.topic, request.partition, request.consumer_group))?)
     }
 
     fn register_broker(&self, request: RegisterBrokerRequest) -> Result<()> {
         self.post(REGISTER_BROKER, request)?;
         Ok(())
     }
+
+    fn list_brokers(&self) -> Result<ListBrokersResponse> {
+        Ok(self.get(BROKERS)?)
+    }
 }
 
 #[automock]
 trait HttpClient : Send + Sync {
-    fn post(&self, uri: &str, body: &str) -> std::result::Result<Response<Body>, ureq::Error>;
+    fn get(&self, uri: &str) -> std::result::Result<Response<Body>, ureq::Error>;
+    fn post<'a>(&self, uri: &str, body: SendBody<'a>) -> std::result::Result<Response<Body>, ureq::Error>;
 }
 
 // Created for testing, as I didn't find a good way to do it in Rust. It's a very thin layer on top of ureq, but much easier to mock.
@@ -132,8 +133,17 @@ struct HttpClientImpl {
 }
 
 impl HttpClient for HttpClientImpl {
-    fn post(&self, uri: &str, body: &str) -> std::result::Result<Response<Body>, ureq::Error> {
-        self.config.new_agent().post(uri).send(body)
+    fn get(&self, uri: &str) -> std::result::Result<Response<Body>, ureq::Error> {
+        self.config.new_agent().get(uri).call()
+    }
+
+    fn post<'a>(&self, uri: &str, body: SendBody<'a>) -> std::result::Result<Response<Body>, ureq::Error> {
+        self.config.new_agent()
+            .post(uri)
+            .header("content-type", "application/json")
+            // not using send_json because it complicates my HttpClient trait a lot due to having to pass a generic type, and then the compiler
+            // whines about it not being dyn compatible + mockall doesn't work either
+            .send(body)
     }
 }
 

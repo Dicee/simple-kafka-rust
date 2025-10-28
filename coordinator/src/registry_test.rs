@@ -8,7 +8,7 @@ const DEFAULT_PORT: u16 = 8000;
 
 #[test]
 fn test_register_broker_multiple() {
-    let mut registry = BrokerRegistry::new();
+    let registry = BrokerRegistry::new();
 
     let host1 = HostAndPort::new(DEFAULT_HOST.to_owned(), DEFAULT_PORT);
     let host2 = HostAndPort::new(DEFAULT_HOST.to_owned(), DEFAULT_PORT + 1);
@@ -23,7 +23,7 @@ fn test_register_broker_multiple() {
 
 #[test]
 fn test_register_broker_duplicate() {
-    let mut registry = BrokerRegistry::new();
+    let registry = BrokerRegistry::new();
 
     let host1 = HostAndPort::new(DEFAULT_HOST.to_owned(), DEFAULT_PORT);
     let host2 = HostAndPort::new(DEFAULT_HOST.to_owned(), DEFAULT_PORT + 1);
@@ -40,11 +40,11 @@ fn test_register_broker_duplicate() {
 
 #[test]
 fn test_register_broker_reads_must_complete_before_writes_take_place() {
-    let mut registry = BrokerRegistry::new();
+    let registry = BrokerRegistry::new();
 
     registry.register_broker(HostAndPort::new(DEFAULT_HOST.to_owned(), DEFAULT_PORT));
 
-    let mut registry_clone = registry.clone();
+    let registry_clone = registry.clone();
     let writer_thread = thread::spawn(move || {
         thread::sleep(Duration::from_millis(100));
         registry_clone.register_broker(HostAndPort::new(DEFAULT_HOST.to_owned(), DEFAULT_PORT + 1));

@@ -1,13 +1,18 @@
 use serde::{Deserialize, Serialize};
 
+// POST operations
 pub const CREATE_TOPIC: &str = "/create-topic";
-pub const GET_TOPIC: &str = "/get-topic";
 pub const INCREMENT_WRITE_OFFSET: &str = "/increment-write-offset";
-pub const GET_WRITE_OFFSET: &str = "/get-write-offset";
 pub const ACK_READ_OFFSET: &str = "/ack-read-offset";
-pub const GET_READ_OFFSET: &str = "/get-read-offset";
-pub const LIST_BROKERS: &str = "/list-brokers";
 pub const REGISTER_BROKER: &str = "/register-broker";
+
+// GET resources
+pub const TOPICS: &str = "/topics";
+pub const PARTITIONS: &str = "partitions";
+pub const CONSUMER_GROUPS: &str = "consumer-groups";
+pub const WRITE_OFFSET: &str = "write-offset";
+pub const READ_OFFSET: &str = "read-offset";
+pub const BROKERS: &str = "brokers";
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]
@@ -106,4 +111,27 @@ pub struct HostAndPort {
 
 impl HostAndPort {
     pub fn new(host: String, port: u16) -> Self { Self { host, port } }
+}
+
+#[derive(Deserialize)]
+#[derive(Eq, PartialEq, Hash, Debug)]
+pub struct TopicPartition {
+    pub topic: String,
+    pub partition: u32,
+}
+
+impl TopicPartition {
+    pub fn new(topic: String, partition: u32) -> Self { Self { topic, partition } }
+}
+
+#[derive(Deserialize)]
+#[derive(Eq, PartialEq, Hash, Debug)]
+pub struct TopicPartitionConsumer {
+    pub topic: String,
+    pub partition: u32,
+    pub consumer_group: String,
+}
+
+impl TopicPartitionConsumer {
+    pub fn new(topic: String, partition: u32, consumer_group: String) -> Self { Self { topic, partition, consumer_group } }
 }

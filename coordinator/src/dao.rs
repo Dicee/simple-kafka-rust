@@ -43,6 +43,7 @@ pub struct Topic {
 }
 
 /// Manages the persistence logic of topic metadata as well as the state of read and write offsets
+#[derive(Clone)] // I checked, the pool's clone method is backed by an Arc reference, so this doesn't duplicate any resource
 pub struct MetadataAndStateDao {
     connection_pool: Pool<SqliteConnectionManager>,
 }

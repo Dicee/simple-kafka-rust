@@ -25,7 +25,7 @@ impl BrokerRegistry {
     /// Registers a broker if and only if it has not been registered yet. If it has already been registered, calling this method again is a no-op.
     /// Note that brokers will be returned in a stable order when accessed later on, i.e. the order in which they were registered. This allows relying
     /// on the order for partitioning.
-    pub fn register_broker(&mut self, host: HostAndPort) {
+    pub fn register_broker(&self, host: HostAndPort) {
         self.brokers.write().unwrap().insert_if_absent(host);
     }
 
