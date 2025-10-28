@@ -75,7 +75,7 @@ fn convert_broker_error(e: BrokerError) -> HttpResponse {
     match e {
         BrokerError::Coordinator(msg) => HttpResponse::BadGateway().body(msg),
         BrokerError::Io(e) => HttpResponse::InternalServerError().body(e.to_string()),
-        BrokerError::Unexpected(msg) => HttpResponse::InternalServerError().body(msg),
+        BrokerError::Internal(msg) => HttpResponse::InternalServerError().body(msg),
     }
 }
 

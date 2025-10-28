@@ -1,7 +1,6 @@
-use crate::broker::Error::{Coordinator, Io, Unexpected};
+use crate::broker::Error::{Coordinator, Io};
 use crate::persistence::indexing::{self, IndexLookupResult};
 use crate::persistence::{AtomicReadAction, AtomicWriteAction, IndexedRecord, LogManager, RotatingAppendOnlyLog, RotatingLogReader};
-use coordinator::client::Client as CoordinatorClient;
 use coordinator::model::{GetReadOffsetRequest, GetWriteOffsetRequest, IncrementWriteOffsetRequest};
 use protocol::record::{deserialize_batch_metadata, read_batch_metadata, read_next_batch, serialize_batch, RecordBatch, BATCH_METADATA_SIZE};
 use std::io;
@@ -16,7 +15,7 @@ mod broker_test;
 
 pub struct Broker {
     log_manager: Arc<LogManager>, // TODO: try removing this Arc
-    coordinator_client: Arc<dyn CoordinatorClient>,
+    coordinator_client: Arc<dyn coordinator::Client>,
 }
 
 #[derive(Debug)]
@@ -24,11 +23,11 @@ pub enum Error {
     // convert to string to not carry more and more complexity as layers go. We won't need more granularity for our error handling.
     Coordinator(String),
     Io(io::Error), // those errors are closer to us since we are directly making IO operations, so we keep them granular
-    Unexpected(String),
+    Internal(String),
 }
 
 impl Broker {
-    pub fn new(log_manager: Arc<LogManager>, coordinator_client: Arc<dyn CoordinatorClient>) -> Self {
+    pub fn new(log_manager: Arc<LogManager>, coordinator_client: Arc<dyn coordinator::Client>) -> Self {
         Self { log_manager, coordinator_client }
     }
 
@@ -37,7 +36,7 @@ impl Broker {
     /// # Errors
     /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
     /// - [Error::Io] if the write operation fails due to an IO error
-    /// - [Error::Unexpected] if anything else fails
+    /// - [Error::Internal] if anything else fails
     pub fn publish(&self, topic: &str, partition: u32, record_batch: RecordBatch) -> Result<u64, Error> {
         let message_count = record_batch.records.len();
         self.publish_raw(topic, partition, serialize_batch(record_batch), message_count as u32)
@@ -47,7 +46,7 @@ impl Broker {
     /// # Errors
     /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
     /// - [Error::Io] if the write operation fails due to an IO error
-    /// - [Error::Unexpected] if anything else fails
+    /// - [Error::Internal] if anything else fails
     pub fn publish_raw(&self, topic: &str, partition: u32, bytes: Vec<u8>, record_count: u32) -> Result<u64, Error> {
         self.log_manager.atomic_write(topic, partition, WriteAndCommit {
             topic: topic.to_owned(),
@@ -63,7 +62,7 @@ impl Broker {
     /// # Errors
     /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
     /// - [Error::Io] if the read operation fails due to an IO error
-    /// - [Error::Unexpected] if anything else fails
+    /// - [Error::Internal] if anything else fails
     pub fn read_next_batch(&self, topic: &str, partition: u32, consumer_group: String) -> Result<Option<RecordBatchWithOffset>, Error> {
         Ok(match self.read_raw_next_batch(topic, partition, consumer_group)? {
             None => None,
@@ -79,7 +78,7 @@ impl Broker {
     /// # Errors
     /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
     /// - [Error::Io] if the read operation fails due to an IO error
-    /// - [Error::Unexpected] if anything else fails
+    /// - [Error::Internal] if anything else fails
     pub fn read_raw_next_batch(&self, topic: &str, partition: u32, consumer_group: String) -> Result<Option<IndexedRecord>, Error> {
         let write_offset = self.coordinator_client.get_write_offset(GetWriteOffsetRequest { topic: topic.to_owned(), partition })?.offset;
         let ack_offset = self.coordinator_client.get_read_offset(GetReadOffsetRequest {
@@ -103,7 +102,7 @@ impl Broker {
 struct WriteAndCommit {
     topic: String,
     partition: u32,
-    coordinator_client: Arc<dyn CoordinatorClient>,
+    coordinator_client: Arc<dyn coordinator::Client>,
     record_count: u32,
     bytes: Vec<u8>,
 }

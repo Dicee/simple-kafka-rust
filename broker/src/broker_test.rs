@@ -2,8 +2,6 @@ use crate::broker::Error::Coordinator;
 use crate::broker::{Broker, Error, RecordBatchWithOffset};
 use crate::persistence::{AtomicWriteAction, LogManager, RotatingAppendOnlyLog};
 use assertor::{assert_that, EqualityAssertion, OptionAssertion, ResultAssertion};
-use coordinator::client::{Client as CoordinatorClient, Client, MockClient as MockCoordinatorClient};
-use coordinator::mock::DummyCoordinatorClient;
 use coordinator::model::*;
 use file_test_utils::TempTestDir;
 use protocol::record::{serialize_batch_into, Header, Record, RecordBatch};
@@ -16,7 +14,7 @@ const CONSUMER_GROUP: &str = "danya-fans";
 #[test]
 fn test_serialization_round_trip_from_first_offset() {
     let temp_dir = TempTestDir::create();
-    let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
     let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp_1 = 0;
@@ -48,13 +46,13 @@ fn test_serialization_round_trip_from_first_offset() {
 fn test_publish_write_offset_not_committed_if_failure_coordinator_failure() {
     let temp_dir = TempTestDir::create();
 
-    let mut coordinator_client = MockCoordinatorClient::new();
+    let mut coordinator_client = coordinator::MockClient::new();
     coordinator_client.expect_get_write_offset()
         .returning(|_| Err(coordinator::client::Error::Api(String::from("Oopsy"))));
 
     coordinator_client.expect_increment_write_offset().never();
 
-    let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(coordinator_client);
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator_client);
     let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp = 15;
@@ -68,7 +66,7 @@ fn test_publish_write_offset_not_committed_if_failure_coordinator_failure() {
 #[test]
 fn test_read_next_batch_initialize_from_exact_base_offset() {
     let temp_dir = TempTestDir::create();
-    let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
     let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp_1 = 0;
@@ -99,7 +97,7 @@ fn test_read_next_batch_initialize_from_exact_base_offset() {
 #[test]
 fn test_read_next_batch_initialize_with_offset_within_a_batch() {
     let temp_dir = TempTestDir::create();
-    let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
     let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp_1 = 0;
@@ -130,7 +128,7 @@ fn test_read_next_batch_initialize_with_offset_within_a_batch() {
 #[test]
 fn test_read_next_batch_initialize_with_offset_at_the_end_of_a_batch() {
     let temp_dir = TempTestDir::create();
-    let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
     let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp_1 = 0;
@@ -167,7 +165,7 @@ fn test_read_next_batch_initialize_with_offset_at_the_end_of_a_batch() {
 #[test]
 fn test_read_next_batch_initialize_before_any_data_is_written() {
     let temp_dir = TempTestDir::create();
-    let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
     let broker = new_broker(&temp_dir, &coordinator_client);
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
@@ -187,7 +185,7 @@ fn test_read_next_batch_initialize_before_any_data_is_written() {
 #[test]
 fn test_read_next_batch_initialize_while_first_batch_is_being_written() {
     let temp_dir = TempTestDir::create();
-    let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
     let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp = 14;
@@ -221,7 +219,7 @@ fn test_read_next_batch_initialize_while_first_batch_is_being_written() {
 #[test]
 fn test_read_next_batch_while_a_batch_is_being_written() {
     let temp_dir = TempTestDir::create();
-    let coordinator_client: Arc<dyn CoordinatorClient> = Arc::new(DummyCoordinatorClient::new());
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
     let broker = new_broker(&temp_dir, &coordinator_client);
 
     let base_timestamp_1 = 14;
@@ -266,7 +264,7 @@ fn test_read_next_batch_while_a_batch_is_being_written() {
         .has_ok(None);
 }
 
-fn ack_read_offset(coordinator_client: Arc<dyn Client>, offset: u64) {
+fn ack_read_offset(coordinator_client: Arc<dyn coordinator::Client>, offset: u64) {
     coordinator_client.ack_read_offset(AckReadOffsetRequest {
         topic: TOPIC.to_owned(),
         partition: PARTITION,
@@ -275,7 +273,7 @@ fn ack_read_offset(coordinator_client: Arc<dyn Client>, offset: u64) {
     }).unwrap();
 }
 
-fn assert_write_offset_is(dummy_coordinator: &dyn Client, offset: Option<u64>) {
+fn assert_write_offset_is(dummy_coordinator: &dyn coordinator::Client, offset: Option<u64>) {
     assert_that!(dummy_coordinator.get_write_offset(GetWriteOffsetRequest { topic: TOPIC.to_owned(), partition: PARTITION }))
         .has_ok(GetWriteOffsetResponse { offset });
 }
@@ -296,7 +294,7 @@ fn new_record(base_timestamp: u64, index: u64) -> Record {
     }
 }
 
-fn new_broker(temp_dir: &TempTestDir, coordinator_client: &Arc<dyn Client>) -> Broker {
+fn new_broker(temp_dir: &TempTestDir, coordinator_client: &Arc<dyn coordinator::Client>) -> Broker {
     Broker {
         log_manager: Arc::new(LogManager::new(temp_dir.path_as_str().to_owned())),
         coordinator_client: Arc::clone(&coordinator_client),

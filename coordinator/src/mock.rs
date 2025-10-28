@@ -6,16 +6,16 @@ use std::sync::Mutex;
 use crate::model::*;
 use client_utils::Result;
 
-pub struct DummyCoordinatorClient {
+pub struct DummyClient {
     pub write_offsets: Mutex<HashMap<TopicPartition, u64>>,
     pub read_offsets: Mutex<HashMap<TopicPartitionConsumer, u64>>,
 }
 
-impl DummyCoordinatorClient {
+impl DummyClient {
     pub fn new() -> Self { Self { write_offsets: Mutex::new(HashMap::new()) ,read_offsets: Mutex::new(HashMap::new()) } }
 }
 
-impl crate::client::Client for DummyCoordinatorClient {
+impl crate::client::Client for DummyClient {
     fn create_topic(&self, request: CreateTopicRequest) -> Result<()> { unimplemented!() }
     fn get_topic(&self, request: GetTopicRequest) -> Result<GetTopicResponse> { unimplemented!() }
     fn list_brokers(&self) -> Result<ListBrokersResponse> { unimplemented!() }

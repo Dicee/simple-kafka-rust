@@ -76,7 +76,7 @@ impl LogManager {
     /// [RotatingAppendOnlyLog], we'll only allow up to 1000 partitions, which is more than enough for the small scale we will test the project at.
     /// # Errors
     /// - [BrokerError::Io] if an IO error occurs during the write operation
-    /// - [BrokerError::Unexpected] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
+    /// - [BrokerError::Internal] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
     pub fn atomic_write(&self, topic: &str, partition: u32, atomic_write: impl AtomicWriteAction) -> Result<u64, BrokerError> {
         self.get_or_create_partition_manager(topic, partition, |e| BrokerError::Io(e))?.atomic_write(atomic_write)
@@ -86,7 +86,7 @@ impl LogManager {
     /// any read operation to the same [RotatingLogReader] as long as this action is running.
     /// # Errors
     /// - [BrokerError::Io] if an IO error occurs during the read operation
-    /// - [BrokerError::Unexpected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
+    /// - [BrokerError::Internal] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
     pub fn atomic_read(&self, topic: &str, partition: u32, consumer_group: String, atomic_read: impl AtomicReadAction) -> Result<IndexedRecord, BrokerError> {
         self.get_or_create_partition_manager(topic, partition, |e| BrokerError::Io(e))?.atomic_read(consumer_group, atomic_read)
@@ -179,7 +179,7 @@ impl PartitionLogManager {
     /// any write operation to the same [RotatingAppendOnlyLog] as long as this action is running.
     /// # Errors
     /// - [BrokerError::Io] if an IO error occurs during the write operation
-    /// - [BrokerError::Unexpected] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
+    /// - [BrokerError::Internal] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
     fn atomic_write(&self, atomic_write: impl AtomicWriteAction) -> Result<u64, BrokerError> {
         let (response_tx, response_rx) = oneshot::channel();
@@ -194,7 +194,7 @@ impl PartitionLogManager {
     /// any read operation to the same [RotatingLogReader] as long as this action is running.
     /// # Errors
     /// - [BrokerError::Io] if an IO error occurs during the read operation
-    /// - [BrokerError::Unexpected] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
+    /// - [BrokerError::Internal] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
     fn atomic_read(&self, consumer_group: String, atomic_action: impl AtomicReadAction) -> Result<IndexedRecord, BrokerError> {
         let atomic_action = Box::new(atomic_action);
@@ -362,5 +362,5 @@ fn get_index_name(first_index: u64) -> String {
 }
 
 fn new_worker_thread_disconnected_error() -> BrokerError {
-    BrokerError::Unexpected(WORKER_THREAD_DISCONNECTED.to_owned())
+    BrokerError::Internal(WORKER_THREAD_DISCONNECTED.to_owned())
 }
