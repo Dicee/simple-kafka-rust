@@ -303,6 +303,7 @@ dependencies = [
  "ntest_timeout",
  "protocol",
  "serde",
+ "serde_json",
  "tokio",
  "walkdir",
 ]

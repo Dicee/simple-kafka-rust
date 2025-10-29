@@ -15,7 +15,7 @@
 - process several batches together on the broker write path, waiting (a limited amount of time) to receive a few messages from the channel and write them all at once
 - avoid negative seeks and reading batch metadata twice (however since these are small seeks it's almost certain that they happen fully in memory, and do not
   have a high cost)
-- use async IO rather than threads with blocking operations
+- use async IO rather than threads with blocking operations (e.g. Tokio's `BufReader/BufWriter`)
 
 ## Scalability
 

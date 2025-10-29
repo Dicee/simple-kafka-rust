@@ -11,6 +11,7 @@ coordinator = { path = "../coordinator" }
 mockall.workspace = true
 protocol = { path = "../protocol" }
 serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 walkdir.workspace = true
 

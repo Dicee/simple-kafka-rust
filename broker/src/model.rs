@@ -22,7 +22,6 @@ pub struct TopicPartition {
     pub partition: u32,
 }
 
-
 #[derive(Serialize, Deserialize)]
 #[derive(Eq, PartialEq, Debug)]
 pub struct PublishResponse {
