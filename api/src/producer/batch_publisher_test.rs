@@ -8,7 +8,7 @@ use protocol::record::{read_next_batch, Record, RecordBatch};
 use std::io::Cursor;
 use std::sync::Arc;
 use std::vec;
-use crate::producer::mock_utils::{eq_serialized_batch, expect_publish_raw, mock_list_brokers, set_up_broker_resolver};
+use crate::producer::mock_utils::{eq_serialized_batch, expect_publish_raw, expect_list_brokers, set_up_broker_resolver};
 
 const TOPIC1: &'static str = "topic1";
 const TOPIC2: &'static str = "topic2";
@@ -21,7 +21,7 @@ fn test_publish_async() {
     let mut coordinator = coordinator::MockClient::new();
     let mut broker = broker::MockClient::new();
 
-    mock_list_brokers(&mut coordinator);
+    expect_list_brokers(&mut coordinator);
     
     let batch1 = new_single_record_batch("value1");
     let batch2 = new_single_record_batch("value2");
@@ -45,7 +45,7 @@ fn test_publish_async_publish_loop_survives_single_broker_failure() {
     let mut coordinator = coordinator::MockClient::new();
     let mut broker_mock = broker::MockClient::new();
     
-    mock_list_brokers(&mut coordinator);
+    expect_list_brokers(&mut coordinator);
 
     let batch1 = new_single_record_batch("value1");
     let batch2 = new_single_record_batch("value2");

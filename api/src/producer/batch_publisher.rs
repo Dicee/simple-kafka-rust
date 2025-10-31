@@ -43,7 +43,7 @@ impl BatchPublisher {
             rx,
         };
 
-        let join_handle = thread::spawn(move || { publisher_task.start_publish_loop() });
+        let join_handle = thread::spawn(move || publisher_task.start_publish_loop());
         Self { tx, join_handle }
     }
 

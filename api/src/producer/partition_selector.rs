@@ -29,7 +29,7 @@ impl PartitionSelector {
     /// otherwise we will fall back to a [RoundRobinPartitionSelector].
     /// # Errors
     /// [Error::CoordinatorApi] or [Error::Ureq] if we failed to make a call to the coordinator service
-    pub fn select_partition(&mut self, topic: &str, record: Record) -> Result<u32> {
+    pub fn select_partition(&mut self, topic: &str, record: &Record) -> Result<u32> {
         // in real life we would cache this locally as it rarely changes, but to simplify we'll just fetch it every time, anyway it's all local
         // so it should not be an issue
         let partition_count = self.coordinator.get_topic(GetTopicRequest { name: topic.to_owned() })
@@ -37,7 +37,7 @@ impl PartitionSelector {
 
         if partition_count == 0 { panic!("Topic {} has no partitions, which should be impossible", topic) };
 
-        Ok(self.hash_selector.try_select_partition(partition_count, record)
+        Ok(self.hash_selector.try_select_partition(partition_count, &record)
             .unwrap_or_else(|| self.round_robin_selector.select_partition(topic, partition_count)))
     }
 }
@@ -48,8 +48,8 @@ impl HashPartitionSelector {
     /// Selects a partition for a given record and partition count based on the key of the record. If the record has no key, [None] is returned.
     /// # Errors
     /// [Error::CoordinatorApi] or [Error::Ureq] if we failed to make a call to the coordinator service
-    fn try_select_partition(&self, partition_count: u32, record: Record) -> Option<u32> {
-        match record.key {
+    fn try_select_partition(&self, partition_count: u32, record: &Record) -> Option<u32> {
+        match &record.key {
             None => None,
             Some(key) => {
                 // As we mention in the README.md, we assume to simplify our project that the number of partitions is fixed, as well as the number of
