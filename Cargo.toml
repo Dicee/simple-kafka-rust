@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["broker", "client_utils", "coordinator", "file_test_utils", "protocol"]
+members = ["api","broker", "client_utils", "coordinator", "file_test_utils", "protocol"]
 
 [workspace.dependencies]
 actix-web = "4.11.0"

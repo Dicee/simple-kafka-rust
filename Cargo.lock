@@ -222,6 +222,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
 
 [[package]]
+name = "api"
+version = "0.1.0"
+dependencies = [
+ "assertor",
+ "broker",
+ "coordinator",
+ "linked-hash-map",
+ "mockall",
+ "protocol",
+ "ureq",
+]
+
+[[package]]
 name = "argh"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
