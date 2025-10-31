@@ -111,6 +111,8 @@ pub struct HostAndPort {
 
 impl HostAndPort {
     pub fn new(host: String, port: u16) -> Self { Self { host, port } }
+    
+    pub fn full_domain(&self) -> String { format!("{}:{}", self.host, self.port) }
 }
 
 #[derive(Deserialize)]
