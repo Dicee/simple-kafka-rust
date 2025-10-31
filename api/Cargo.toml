@@ -8,6 +8,7 @@ broker = { path = "../broker" }
 coordinator = { path = "../coordinator" }
 linked-hash-map = "0.5.6"
 mockall.workspace = true
+predicates.workspace = true
 protocol = { path = "../protocol" }
 ureq.workspace = true
 
