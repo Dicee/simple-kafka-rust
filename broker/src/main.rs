@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::broker::Broker;
 use crate::persistence::LogManager;
 use argh::FromArgs;
-use ::broker::model::{PublishResponse, ReadNextBatchRequest, TopicPartition};
+use ::broker::model::{PublishRawRequest, PublishResponse, ReadNextBatchRequest, TopicPartition};
 use broker::Error as BrokerError;
 use coordinator::model::RegisterBrokerRequest;
 use protocol::record::RecordBatch;
@@ -49,6 +49,18 @@ async fn publish(
     )
 }
 
+#[post("/publish-raw")]
+async fn publish_raw(
+    broker: web::Data<Arc<Broker>>,
+    query: web::Query<PublishRawRequest>,
+    body: web::Bytes,
+) -> impl Responder {
+    build_http_response(
+        web::block(move || { broker.publish_raw(&query.topic, query.partition, body.to_vec(), query.record_count) }).await,
+        |base_offset| PublishResponse { base_offset }
+    )
+}
+
 // Note this is a post because it modifies some state on the server. Ideally the client should just send an offset to read from, but for now we
 // do not have an operation capable of reinitializing the state of the reader on the broker side if we notice that the request offset is not the 
 // one the reader is currently tracking. For simplicity's sake, we'll keep the stateful API for now (I want to get things to work end-to-end before
@@ -65,7 +77,7 @@ async fn read_next_batch(
     )
 }
 
-fn build_http_response<T, R: Serialize, F>(result: Result<Result<T, BrokerError>, BlockingError>, converter: F) -> HttpResponse
+fn build_http_response<T: Clone, R: Serialize, F>(result: Result<Result<T, BrokerError>, BlockingError>, converter: F) -> HttpResponse
 where F: Fn(T) -> R {
     match result {
         Ok(Ok(t)) => HttpResponse::Ok().json(converter(t)),
@@ -96,6 +108,7 @@ async fn main() -> std::io::Result<()> {
     let server = HttpServer::new(move || App::new()
         .app_data(broker.clone())
         .service(publish)
+        .service(publish_raw)
         .service(read_next_batch)
     );
     server

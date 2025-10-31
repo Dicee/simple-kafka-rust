@@ -1,3 +1,4 @@
+use std::io::Cursor;
 use mockall::automock;
 use serde::{Deserialize, Serialize};
 use ureq;
@@ -56,6 +57,13 @@ impl ApiClient {
         } else {
             Ok(())
         }
+    }
+
+    pub fn post_raw_and_parse<Res>(&self, api: &str, bytes: Vec<u8>) -> Result<Res>
+    where for<'de> Res: Deserialize<'de> {
+        let uri = format!("{}{api}", self.url_base);
+        let body = SendBody::from_owned_reader(Cursor::new(bytes));
+        Self::parse_response(self.http_client.post(&uri, body)?)
     }
 
     pub fn post_and_parse<Req: Serialize, Res>(&self, api: &str, request: Req) -> Result<Res>
