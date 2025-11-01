@@ -140,6 +140,8 @@ async fn main() -> std::io::Result<()> {
         .service(ack_read_offset).service(get_read_offset)
         .service(register_broker).service(list_brokers)
     );
+
+    println!("Starting server on {}:{}...", args.host, args.port);
     server
         .workers(5)
         .bind((args.host, args.port))?

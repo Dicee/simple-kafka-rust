@@ -12,7 +12,7 @@ pub const PARTITIONS: &str = "partitions";
 pub const CONSUMER_GROUPS: &str = "consumer-groups";
 pub const WRITE_OFFSET: &str = "write-offset";
 pub const READ_OFFSET: &str = "read-offset";
-pub const BROKERS: &str = "brokers";
+pub const BROKERS: &str = "/brokers";
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]

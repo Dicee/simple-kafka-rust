@@ -1,0 +1,71 @@
+services:
+  coordinator:
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/ping" ]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5000:5000"
+    volumes:
+      - coordinator:/var/lib/simple-kafka-rust
+    build:
+      context: ..
+      dockerfile: docker/coordinator/Dockerfile
+  broker1:
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/ping" ]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - broker1:/var/lib/simple-kafka-rust
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "--coordinator-endpoint"
+      - "coordinator:5000"
+      - "--root-path"
+      - "/var/lib/simple-kafka-rust/topics"
+    build:
+      context: ..
+      dockerfile: docker/broker/Dockerfile
+  broker2:
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8001/ping" ]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      coordinator:
+        condition: service_healthy
+      # just for testing, it's useful to enforce a consistent start-up order of the brokers since we kept broker registration in memory in the coordinatorm  
+      broker1: 
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    volumes:
+      - broker2:/var/lib/simple-kafka-rust
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8001"
+      - "--coordinator-endpoint"
+      - "coordinator:5000"
+      - "--root-path"
+      - "/var/lib/simple-kafka-rust/topics"
+    build:
+      context: ..
+      dockerfile: docker/broker/Dockerfile
+volumes:
+  coordinator:
+  broker1:
+  broker2:

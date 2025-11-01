@@ -37,6 +37,9 @@ struct Args {
     root_path: String,
 }
 
+#[get("/ping")]
+async fn ping() -> impl Responder { "{\"ping\": \"pong\"}" }
+
 #[post("/publish")]
 async fn publish(
     broker: web::Data<Arc<Broker>>,
@@ -107,10 +110,12 @@ async fn main() -> std::io::Result<()> {
 
     let server = HttpServer::new(move || App::new()
         .app_data(broker.clone())
-        .service(publish)
-        .service(publish_raw)
+        .service(ping)
+        .service(publish).service(publish_raw)
         .service(read_next_batch)
     );
+
+    println!("Starting server on {}:{}...", args.host, args.port);
     server
         // seems more than enough since these threads take the request asynchronously, and there are other threads taking care of the read and write
         // operations (one per partition)

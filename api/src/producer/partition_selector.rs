@@ -20,7 +20,7 @@ impl PartitionSelector {
     pub fn new(coordinator: Arc<dyn coordinator::Client>) -> Self {
         Self {
             coordinator,
-            hash_selector: HashPartitionSelector { },
+            hash_selector: HashPartitionSelector::new(),
             round_robin_selector: RoundRobinPartitionSelector::new(),
         }
     }
@@ -45,6 +45,8 @@ impl PartitionSelector {
 /// Hash-based partition selector, based on the record's key.
 struct HashPartitionSelector {}
 impl HashPartitionSelector {
+    fn new() -> Self { Self{} }
+
     /// Selects a partition for a given record and partition count based on the key of the record. If the record has no key, [None] is returned.
     /// # Errors
     /// [Error::CoordinatorApi] or [Error::Ureq] if we failed to make a call to the coordinator service
