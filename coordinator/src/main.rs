@@ -26,6 +26,11 @@ struct Args {
     db_path: String,
 }
 
+// used for the health check to start the Docker container of broker instances only when the
+// coordinator is ready to receive registration requests
+#[get("/ping")]
+async fn ping() -> impl Responder { "{\"ping\": \"pong\"}" }
+
 #[post("/create-topic")]
 async fn create_topic(
     dao: web::Data<Arc<MetadataAndStateDao>>,
