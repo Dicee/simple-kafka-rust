@@ -134,6 +134,7 @@ async fn main() -> std::io::Result<()> {
     let server = HttpServer::new(move || App::new()
         .app_data(dao.clone())
         .app_data(broker_registry.clone())
+        .service(ping)
         .service(create_topic).service(get_topic)
         .service(inc_write_offset).service(get_write_offset)
         .service(ack_read_offset).service(get_read_offset)
