@@ -116,7 +116,10 @@ impl RotatingAppendOnlyLog {
         })
     }
 
-    pub fn write_all(&mut self, index: u64, buf: &[u8]) -> io::Result<()> {
+    /// Writes the provided bytes at an indexable position, that is the start of a batch or record (whatever is the smallest serialization unit). This method
+    /// **MUST** be used for any indexable position, otherwise we will degrade indexing performance (up to 100% if we never call this method). This method
+    /// will trigger rotation **before** writing the bytes if writing them would cause the file to exceed the rotation size threshold, or already exceeds it.
+    pub fn write_all_indexable(&mut self, index: u64, buf: &[u8]) -> io::Result<()> {
         // note that while converting usize to u64 is always safe, the reverse is not true
         if buf.len() as u64 + self.current_byte_size >= self.max_byte_size {
             self.flush()?;
@@ -130,11 +133,20 @@ impl RotatingAppendOnlyLog {
             self.current_byte_size = 0;
         }
 
+        let start_byte_offset = self.current_byte_size;
+        self.write_all(buf)?; // this modifies current_byte_size, hence the copy above (and I prefer writing the data before the index)
+        self.index_writer.ack_bytes_written(index, start_byte_offset)?;
+
+        Ok(())
+    }
+
+    /// Writes the provided bytes to the file without updating the index. This method **MUST** be used when writing bytes that are not at the start of
+    /// a record/batch, because they are not at an indexable position. Note that this method also never causes a rotation, because it's simpler for us
+    /// to have only full records/batches within a file, rather than having to decode it across the end of a file and the beginning of the next.
+    pub fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         // order matters as we only update the size if the write was successful to prevent an inconsistent state
         self.log.write_all(buf)?;
-        self.index_writer.ack_bytes_written(index, self.current_byte_size)?;
         self.current_byte_size += buf.len() as u64;
-
         Ok(())
     }
 

@@ -114,9 +114,8 @@ impl AtomicWriteAction for WriteAndCommit {
 
         // Note that adding the offset has to be done by the broker as there may be multiple publishers, and only the broker can do this
         // while guaranteeing consistency.
-
-        log.write_all(next_offset, &next_offset.to_le_bytes())?;
-        log.write_all(next_offset, &self.bytes)?;
+        log.write_all_indexable(next_offset, &next_offset.to_le_bytes())?;
+        log.write_all(&self.bytes)?;
         log.flush()?;
 
         self.coordinator_client.increment_write_offset(IncrementWriteOffsetRequest {

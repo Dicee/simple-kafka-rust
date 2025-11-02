@@ -143,7 +143,7 @@ struct WriteAndCommit(u64, Vec<u8>);
 
 impl AtomicWriteAction for WriteAndCommit {
     fn write_to(&self, log: &mut RotatingAppendOnlyLog) -> Result<u64, BrokerError> {
-        log.write_all(self.0, &self.1)?;
+        log.write_all_indexable(self.0, &self.1)?;
         log.flush()?;
         Ok(self.0)
     }

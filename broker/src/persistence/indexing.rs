@@ -26,7 +26,7 @@ mod indexing_test;
 /// - a record batch contains about 50 records (so there are about 200 batches in one file).
 /// We want to have roughly logarithmic (in the number of records) access to a record, so roughly 10 disk seeks to find the base offset of the batch.
 /// To achieve that, we need to index every 20 batches, namely every 1000 records.
-const MAX_INDEX_GAP: u64 = 1000;
+pub(crate) const MAX_INDEX_GAP: u64 = 1000;
 
 pub struct LogIndexWriter {
     root_path: PathBuf,

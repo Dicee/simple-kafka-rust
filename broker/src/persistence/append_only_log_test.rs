@@ -1,7 +1,7 @@
 use super::{AppendOnlyLog,  RotatingAppendOnlyLog};
 use file_test_utils::{assert_file_has_content, TempTestDir, TempTestFile};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use assertor::{assert_that, ResultAssertion};
 use crate::persistence::get_log_path;
 use crate::persistence::indexing::{LogIndexWriter, parse_index_file};
@@ -87,9 +87,9 @@ fn test_open_new_rotated_log() {
     write_to_file(&root_path, "trash_file", "whatever");
     fs::create_dir(format!("{root_path}trash_dir")).unwrap();
 
-    let mut log = new_rotated_log(root_path.clone());
+    let mut log = new_rotating_log(root_path.clone());
     let content = "Hello world!";
-    log.write_all(0, content.as_bytes()).unwrap();
+    log.write_all_indexable(0, content.as_bytes()).unwrap();
     log.flush().unwrap();
 
     assert_file_has_content(&format!("{}00000.log", root_path), content);
@@ -108,8 +108,8 @@ fn test_open_existing_rotated_log() {
     write_to_file(&root_path, "trash_file", "whatever");
     fs::create_dir(format!("{root_path}trash_dir")).unwrap();
 
-    let mut log = new_rotated_log(root_path.clone());
-    log.write_all(5, "Hello world!".as_bytes()).unwrap();
+    let mut log = new_rotating_log(root_path.clone());
+    log.write_all_indexable(5, "Hello world!".as_bytes()).unwrap();
     log.flush().unwrap();
 
     assert_file_has_content(&format!("{}00003.log", root_path), "3");
@@ -127,10 +127,10 @@ fn test_open_rotated_log_already_at_max_bytes() {
     fs::create_dir_all(root_path.clone()).unwrap();
     fs::write(&existing_file_path, existing_content).unwrap();
 
-    let mut log = new_rotated_log(root_path.clone());
+    let mut log = new_rotating_log(root_path.clone());
 
     let new_content = "Hello world!";
-    log.write_all(4, new_content.as_bytes()).unwrap();
+    log.write_all_indexable(4, new_content.as_bytes()).unwrap();
     log.flush().unwrap();
 
     assert_file_has_content(&existing_file_path, existing_content);
@@ -148,7 +148,7 @@ fn test_open_rotated_malformed_index_not_a_number() {
     fs::create_dir_all(root_path.clone()).unwrap();
     fs::write(&existing_file_path, "Yay!").unwrap();
 
-    new_rotated_log(root_path);
+    new_rotating_log(root_path);
 }
 
 #[test]
@@ -157,21 +157,14 @@ fn test_rotate() {
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
 
     let log_path = get_log_path(&root_path, 0);
-    let mut log = RotatingAppendOnlyLog {
-        root_path: root_path.clone(),
-        log: AppendOnlyLog::open(&log_path).unwrap(),
-        max_byte_size: DEFAULT_MAX_BYTES,
-        current_byte_size: 0,
-        // opening with a gap of 0 to record every single index
-        index_writer: LogIndexWriter::open_with_config(&log_path, 0).unwrap(),
-    };
+    let mut log = new_rotating_log_with_zero_indexing_gap(&root_path, &log_path);
 
     let content = "Hello world!";
-    log.write_all(0, content.as_bytes()).unwrap();
-    log.write_all(1, content.as_bytes()).unwrap();
-    log.write_all(2, content.as_bytes()).unwrap();
-    log.write_all(3, content.as_bytes()).unwrap();
-    log.write_all(4, content.as_bytes()).unwrap();
+    log.write_all_indexable(0, content.as_bytes()).unwrap();
+    log.write_all_indexable(1, content.as_bytes()).unwrap();
+    log.write_all_indexable(2, content.as_bytes()).unwrap();
+    log.write_all_indexable(3, content.as_bytes()).unwrap();
+    log.write_all_indexable(4, content.as_bytes()).unwrap();
 
     temp_dir.assert_exactly_contains_files(&vec![
         "my-topic/partition=12/00000.index".to_string(),
@@ -207,7 +200,38 @@ fn test_rotate_while_next_file_exists() {
     let mut log = RotatingAppendOnlyLog::open_latest(root_path.clone(), content.len() as u64 + 1).unwrap();
     write_to_file(&root_path, "00004.log", content);
 
-    log.write_all(4, &[55, 56]).unwrap(); // triggers a rotation, which should fail because the file with index 4 is already present
+    log.write_all_indexable(4, &[55, 56]).unwrap(); // triggers a rotation, which should fail because the file with index 4 is already present
+}
+
+#[test]
+fn test_rotate_only_triggered_by_indexable_write() {
+    let temp_dir = TempTestDir::create();
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
+
+    let log_path = get_log_path(&root_path, 0);
+    let mut log = new_rotating_log_with_zero_indexing_gap(&root_path, &log_path);
+
+    let content = "Hello world!";
+    log.write_all_indexable(0, content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
+    log.write_all(content.as_bytes()).unwrap();
+    log.write_all_indexable(1, content.as_bytes()).unwrap();
+
+    temp_dir.assert_exactly_contains_files(&vec![
+        "my-topic/partition=12/00000.index".to_string(),
+        "my-topic/partition=12/00000.log".to_string(),
+        "my-topic/partition=12/00001.index".to_string(),
+        "my-topic/partition=12/00001.log".to_string(),
+    ]);
+
+    assert_file_has_content(&format!("{}00000.log", &root_path), "Hello world!Hello world!Hello world!Hello world!");
+
+    log.flush().unwrap();
+    assert_file_has_content(&format!("{}00001.log", &root_path), "Hello world!");
+
+    assert_that!(parse_index_file(&temp_dir.resolve("my-topic/partition=12/00000.index"))).has_ok(vec![(0, 0), (1, 48)]);
+    assert_that!(parse_index_file(&temp_dir.resolve("my-topic/partition=12/00001.index"))).has_ok(vec![(1, 0)]);
 }
 
 #[test]
@@ -219,8 +243,8 @@ fn test_drop_rotated_log() {
     let content = "How are you doing mate?";
 
     {
-        let mut log = new_rotated_log(root_path);
-        log.write_all(0, content.as_bytes()).unwrap();
+        let mut log = new_rotating_log(root_path);
+        log.write_all_indexable(0, content.as_bytes()).unwrap();
         assert_file_has_content(&expected_path, "");
     }
 
@@ -231,6 +255,18 @@ fn write_to_file(root_path: &String, file_name: &str, content: &str) {
     fs::write(&format!("{root_path}{file_name}"), content).unwrap();
 }
 
-fn new_rotated_log(root_path: String) -> RotatingAppendOnlyLog {
+fn new_rotating_log(root_path: String) -> RotatingAppendOnlyLog {
     RotatingAppendOnlyLog::open_latest(root_path, DEFAULT_MAX_BYTES).unwrap()
+}
+
+// helps verifying all the calls to the index writer without mocking
+fn new_rotating_log_with_zero_indexing_gap(root_path: &String, log_path: &PathBuf) -> RotatingAppendOnlyLog {
+    RotatingAppendOnlyLog {
+        root_path: root_path.clone(),
+        log: AppendOnlyLog::open(&log_path).unwrap(),
+        max_byte_size: DEFAULT_MAX_BYTES,
+        current_byte_size: 0,
+        // opening with a gap of 0 to record every single index
+        index_writer: LogIndexWriter::open_with_config(&log_path, 0).unwrap(),
+    }
 }

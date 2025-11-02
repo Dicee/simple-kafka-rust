@@ -1,6 +1,6 @@
 use crate::broker::Error::Coordinator;
 use crate::broker::{Broker, Error, RecordBatchWithOffset};
-use crate::persistence::{AtomicWriteAction, LogManager, RotatingAppendOnlyLog};
+use crate::persistence::{indexing, AtomicWriteAction, LogManager, RotatingAppendOnlyLog};
 use assertor::{assert_that, EqualityAssertion, OptionAssertion, ResultAssertion};
 use coordinator::model::*;
 use file_test_utils::TempTestDir;
@@ -40,6 +40,25 @@ fn test_serialization_round_trip_from_first_offset() {
         .has_value(RecordBatchWithOffset { base_offset: 2, batch: batch_2 });
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()).unwrap()).is_none();
+}
+
+// this test was added due to an indexing bug I had when writing exactly at the threshold that triggers indexing
+#[test]
+fn test_write_more_than_indexing_threshold() {
+    let temp_dir = TempTestDir::create();
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
+    let broker = new_broker(&temp_dir, &coordinator_client);
+
+    for i in 0..2 * indexing::MAX_INDEX_GAP + 5 {
+        let batch = new_record_batch(i, vec![new_record(i, 1), new_record(i, 2)]);
+        broker.publish(TOPIC, PARTITION, batch).unwrap();
+    }
+
+    for i in 0..2 * indexing::MAX_INDEX_GAP + 5 {
+        let batch = new_record_batch(i, vec![new_record(i, 1), new_record(i, 2)]);
+        assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()).unwrap())
+            .has_value(RecordBatchWithOffset { base_offset: i * 2, batch });
+    }
 }
 
 #[test]
@@ -305,7 +324,7 @@ struct WriteAndCommit(u64, Vec<u8>);
 
 impl AtomicWriteAction for WriteAndCommit {
     fn write_to(&self, log: &mut RotatingAppendOnlyLog) -> Result<u64, Error> {
-        log.write_all(self.0, &self.1)?;
+        log.write_all_indexable(self.0, &self.1)?;
         log.flush()?;
         Ok(self.0)
     }

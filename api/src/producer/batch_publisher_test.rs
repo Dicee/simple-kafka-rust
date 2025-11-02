@@ -33,7 +33,7 @@ fn test_publish_async() {
     let broker: Arc<dyn broker::Client> = Arc::new(broker);
 
     let broker_resolver = set_up_broker_resolver(Arc::clone(&coordinator), Arc::clone(&broker));
-    let publisher = BatchPublisher::new(Arc::clone(&coordinator), broker_resolver);
+    let publisher = BatchPublisher::new(broker_resolver);
 
     publisher.publish_async(TopicPartition { topic: TOPIC1.to_owned(), partition: P1 }, batch1);
     publisher.publish_async(TopicPartition { topic: TOPIC2.to_owned(), partition: P2 }, batch2);
@@ -63,7 +63,7 @@ fn test_publish_async_publish_loop_survives_single_broker_failure() {
     let broker: Arc<dyn broker::Client> = Arc::new(broker_mock);
 
     let broker_resolver = set_up_broker_resolver(Arc::clone(&coordinator), Arc::clone(&broker));
-    let publisher = BatchPublisher::new(Arc::clone(&coordinator), broker_resolver);
+    let publisher = BatchPublisher::new(broker_resolver);
 
     publisher.publish_async(TopicPartition { topic: TOPIC1.to_owned(), partition: P1 }, batch1);
     publisher.publish_async(TopicPartition { topic: TOPIC2.to_owned(), partition: P2 }, batch2);

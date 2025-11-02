@@ -55,7 +55,7 @@ impl Client {
     }
 
     fn new_for_testing(config: Config, coordinator: Arc<dyn coordinator::Client>, broker_resolver: BrokerResolver) -> Result<Self> {
-        let batch_publisher = Arc::new(BatchPublisher::new(Arc::clone(&coordinator), broker_resolver));
+        let batch_publisher = Arc::new(BatchPublisher::new(broker_resolver));
 
         let partition_selector = PartitionSelector::new(Arc::clone(&coordinator));
         let resume_reaping_notifier = Arc::new(Condvar::new());

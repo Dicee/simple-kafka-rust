@@ -1,8 +1,8 @@
-use crate::common::{self, map_broker_error, broker_resolver::BrokerResolver};
+use crate::common::{self, broker_resolver::BrokerResolver, map_broker_error};
 use broker::model::TopicPartition;
 use protocol::record::{serialize_batch, RecordBatch};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -34,16 +34,9 @@ struct PublishRequest {
 }
 
 impl BatchPublisher {
-    pub fn new(coordinator: Arc<dyn coordinator::Client>, broker_resolver: BrokerResolver) -> Self {
+    pub fn new(broker_resolver: BrokerResolver) -> Self {
         let (tx, rx) = mpsc::channel();
-
-        let publisher_task = BatchPublisherTask {
-            coordinator: Arc::clone(&coordinator),
-            broker_resolver,
-            rx,
-        };
-
-        let join_handle = thread::spawn(move || publisher_task.start_publish_loop());
+        let join_handle = thread::spawn(|| BatchPublisherTask { broker_resolver, rx }.start_publish_loop());
         Self { tx, join_handle }
     }
 
@@ -62,7 +55,6 @@ impl BatchPublisher {
 }
 
 struct BatchPublisherTask {
-    coordinator: Arc<dyn coordinator::Client>,
     broker_resolver: BrokerResolver,
     rx: Receiver<PublishRequest>,
 }
