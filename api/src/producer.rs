@@ -9,7 +9,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{atomic, Arc, Condvar, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 use crate::common::broker_resolver::BrokerResolver;
 
 mod batch_publisher;
@@ -162,6 +162,7 @@ impl BatchReaperTask {
             match batches.iter().next() {
                 Some((_, inflight_batch)) => {
                     let time_to_expiry =  self.config.linger_duration.sub(now.duration_since(inflight_batch.start));
+                    drop(batches); //  release the lock before sleeping
                     thread::sleep(time_to_expiry);
                 }
                 None => continue,

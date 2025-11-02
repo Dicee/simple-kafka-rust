@@ -6,6 +6,7 @@ use protocol::record::{Record, RecordBatch};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use ntest_timeout::timeout;
 
 ///! Please note that these tests aren't ideal. In Java or Kotlin I would have mocked all the dependencies of producer::Client to ease testing and
 ///  allow going in depth, however with Rust and mockall I feel mocking is pretty heavyweight (I don't like introducing trait objects everywhere,
@@ -181,6 +182,37 @@ fn test_send_record_multiple_topic_partitions() {
     producer.send_record(TOPIC2.to_owned(), new_record(6)).unwrap();
 
     producer.shutdown().unwrap();
+}
+
+#[test]
+#[timeout(300)]
+fn test_batch_reaper_releases_lock_before_sleeping() {
+    let max_batch_size = 2;
+    let linger_duration = Duration::from_secs(1000); // the sleep is going to be very long
+    let config = new_config(max_batch_size, linger_duration);
+
+    let mut coordinator = coordinator::MockClient::new();
+    let mut broker = broker::MockClient::new();
+
+    expect_list_brokers(&mut coordinator);
+    expect_get_topic(&mut coordinator, TOPIC1, PARTITION_COUNT1);
+
+    let expected_batch = new_record_batch(vec![new_record(1), new_record(2)]);
+    expect_publish_raw_ignoring_timestamps(&mut broker, TOPIC1, P1, expected_batch);
+
+    let coordinator: Arc<dyn coordinator::Client> = Arc::new(coordinator);
+    let broker: Arc<dyn broker::Client> = Arc::new(broker);
+    let broker_resolver = set_up_broker_resolver(Arc::clone(&coordinator), broker);
+    let mut producer = producer::Client::new_for_testing(config, coordinator, broker_resolver).unwrap();
+
+    // Adding a record to the map of batches will waken the reaper task. We add some sleep to give it the chance to wake up and acquire the lock
+    producer.send_record(TOPIC1.to_owned(), new_record(1)).unwrap();
+    thread::sleep(Duration::from_millis(200));
+
+    // This second call also requires acquiring the lock, so if the reaper task has kept the lock during its sleep, which will last about 1000 seconds,
+    // then this call will never end before the test's timeout. Note that we do not shutdown in this test because the reaper thread doesn't check the
+    // shutdown flag during its sleep.
+    producer.send_record(TOPIC1.to_owned(), new_record(2)).unwrap();
 }
 
 #[test]

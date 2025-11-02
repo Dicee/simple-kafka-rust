@@ -230,9 +230,11 @@ dependencies = [
  "coordinator",
  "linked-hash-map",
  "mockall",
+ "ntest_timeout",
  "predicates",
  "protocol",
  "ureq",
+ "uuid",
 ]
 
 [[package]]
