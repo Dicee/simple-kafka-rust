@@ -9,6 +9,7 @@
 
 - return fine-grained, strongly typed deserializable errors from my HTTP clients for API 4xx
 - add proper logging
+- add back-pressure in `BatchPublisher` to avoid being overwhelmed if publishing to the brokers is much slower than the producer is at sending records
 
 ## Optimizations
 
@@ -16,6 +17,7 @@
 - avoid negative seeks and reading batch metadata twice (however since these are small seeks it's almost certain that they happen fully in memory, and do not
   have a high cost)
 - use async IO rather than threads with blocking operations (e.g. Tokio's `BufReader/BufWriter`)
+- use async tasks (one per topic/partition probably) in `BatchPublisher`
 
 ## Scalability
 

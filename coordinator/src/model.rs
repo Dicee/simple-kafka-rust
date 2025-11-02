@@ -28,7 +28,7 @@ pub struct GetTopicRequest {
 }
 
 #[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct GetTopicResponse {
     pub name: String,
     pub partition_count: u32,
