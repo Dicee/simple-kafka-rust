@@ -40,6 +40,8 @@ fn test_serialization_round_trip_from_first_offset() {
         .has_value(RecordBatchWithOffset { base_offset: 2, batch: batch_2 });
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()).unwrap()).is_none();
+
+    broker.shutdown().unwrap();
 }
 
 // this test was added due to an indexing bug I had when writing exactly at the threshold that triggers indexing
@@ -59,6 +61,8 @@ fn test_write_more_than_indexing_threshold() {
         assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()).unwrap())
             .has_value(RecordBatchWithOffset { base_offset: i * 2, batch });
     }
+
+    broker.shutdown().unwrap();
 }
 
 #[test]
@@ -111,6 +115,8 @@ fn test_read_next_batch_initialize_from_exact_base_offset() {
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
         .has_ok(None);
+    
+    broker.shutdown().unwrap();
 }
 
 #[test]
@@ -142,6 +148,8 @@ fn test_read_next_batch_initialize_with_offset_within_a_batch() {
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
         .has_ok(None);
+
+    broker.shutdown().unwrap();
 }
 
 #[test]
@@ -179,6 +187,8 @@ fn test_read_next_batch_initialize_with_offset_at_the_end_of_a_batch() {
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
         .has_ok(None);
+
+    broker.shutdown().unwrap();
 }
 
 #[test]
@@ -199,6 +209,8 @@ fn test_read_next_batch_initialize_before_any_data_is_written() {
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
         .has_ok(None);
+
+    broker.shutdown().unwrap();
 }
 
 #[test]
@@ -233,6 +245,8 @@ fn test_read_next_batch_initialize_while_first_batch_is_being_written() {
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
         .has_ok(None);
+
+    broker.shutdown().unwrap();
 }
 
 #[test]
@@ -281,6 +295,8 @@ fn test_read_next_batch_while_a_batch_is_being_written() {
 
     assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
         .has_ok(None);
+
+    broker.shutdown().unwrap();
 }
 
 fn ack_read_offset(coordinator_client: Arc<dyn coordinator::Client>, offset: u64) {
@@ -315,7 +331,7 @@ fn new_record(base_timestamp: u64, index: u64) -> Record {
 
 fn new_broker(temp_dir: &TempTestDir, coordinator_client: &Arc<dyn coordinator::Client>) -> Broker {
     Broker {
-        log_manager: Arc::new(LogManager::new(temp_dir.path_as_str().to_owned())),
+        log_manager: LogManager::new(temp_dir.path_as_str().to_owned()),
         coordinator_client: Arc::clone(&coordinator_client),
     }
 }

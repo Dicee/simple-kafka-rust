@@ -38,8 +38,8 @@ impl ApiClient {
         Self::new_with_http_client(domain, debug, use_tls, http_client)
     }
 
-    // for testing
-    fn new_with_http_client(domain: String, debug: bool, use_tls: bool, http_client: Box<dyn HttpClient>) -> Self {
+    // purely for testing, exposed for users to be able to mock network calls as well
+    pub fn new_with_http_client(domain: String, debug: bool, use_tls: bool, http_client: Box<dyn HttpClient>) -> Self {
         let protocol = if use_tls { "https" } else { "http" };
         Self {
             url_base: format!("{protocol}://{domain}"),
@@ -99,8 +99,9 @@ impl ApiClient {
     }
 }
 
+// purely for testing, exposed for users to be able to mock network calls as well
 #[automock]
-trait HttpClient : Send + Sync {
+pub trait HttpClient : Send + Sync {
     fn get(&self, uri: &str) -> std::result::Result<Response<Body>, ureq::Error>;
     fn post<'a>(&self, uri: &str, body: SendBody<'a>) -> std::result::Result<Response<Body>, ureq::Error>;
 }

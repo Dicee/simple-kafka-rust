@@ -13,6 +13,7 @@ services:
       context: ..
       dockerfile: docker/coordinator/Dockerfile
   broker1:
+    init: true
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/ping" ]
       interval: 1s
@@ -38,6 +39,7 @@ services:
       context: ..
       dockerfile: docker/broker/Dockerfile
   broker2:
+    init: true
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8001/ping" ]
       interval: 1s

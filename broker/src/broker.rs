@@ -3,7 +3,7 @@ use crate::persistence::indexing::{self, IndexLookupResult};
 use crate::persistence::{AtomicReadAction, AtomicWriteAction, IndexedRecord, LogManager, RotatingAppendOnlyLog, RotatingLogReader};
 use coordinator::model::{GetReadOffsetRequest, GetWriteOffsetRequest, IncrementWriteOffsetRequest};
 use protocol::record::{deserialize_batch_metadata, read_batch_metadata, read_next_batch, serialize_batch, RecordBatch, BATCH_METADATA_SIZE};
-use std::io;
+use std::{io, thread};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,7 +14,7 @@ use broker::model::RecordBatchWithOffset;
 mod broker_test;
 
 pub struct Broker {
-    log_manager: Arc<LogManager>, // TODO: try removing this Arc
+    log_manager: LogManager,
     coordinator_client: Arc<dyn coordinator::Client>,
 }
 
@@ -27,7 +27,7 @@ pub enum Error {
 }
 
 impl Broker {
-    pub fn new(log_manager: Arc<LogManager>, coordinator_client: Arc<dyn coordinator::Client>) -> Self {
+    pub fn new(log_manager: LogManager, coordinator_client: Arc<dyn coordinator::Client>) -> Self {
         Self { log_manager, coordinator_client }
     }
 
@@ -96,6 +96,13 @@ impl Broker {
         else {
             Some(indexed_record)
         })
+    }
+
+    /// Attempts shutting down the broker gracefully (terminating all background threads, closing all file handles etc)
+    pub fn shutdown(self) -> thread::Result<()> {
+        println!("Shutting down broker...");
+        self.log_manager.shutdown()?;
+        Ok(println!("Broker shutdown complete!"))
     }
 }
 

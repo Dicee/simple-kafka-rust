@@ -109,10 +109,11 @@ impl LogManager {
         }))
     }
 
+    /// Attempts shutting down the log manager gracefully (terminating all background threads, closing all file handles etc)
     pub fn shutdown(self) -> thread::Result<()> {
         self.shutdown.store(true, atomic::Ordering::Relaxed);
 
-        let log_files = Arc::try_unwrap(self.log_files)
+        let log_files = Arc::into_inner(self.log_files)
             .expect("LogManager::shutdown called, but other Arc clones of log_files still exist.")
             .into_inner()
             .expect("Mutex poisoned. Partition managers may be in an inconsistent state.");
@@ -121,7 +122,7 @@ impl LogManager {
 
         log_files.into_iter()
             .map(|(_, partition_manager)|
-                Arc::try_unwrap(partition_manager)
+                Arc::into_inner(partition_manager)
                     .expect("LogManager::shutdown called, but other Arc clones of this PartitionLogManager still exist.")
                     .shutdown()
             )
@@ -223,6 +224,7 @@ impl PartitionLogManager {
         response_rx.blocking_recv().unwrap_or_else(|_| Err(new_worker_thread_disconnected_error()))
     }
 
+    /// Attempts shutting down the partition manager gracefully (terminating all background threads, closing all file handles etc)
     fn shutdown(self) -> thread::Result<()> {
         let consumers = self.consumers.into_inner().expect("Mutex poisoned. This partition manager may be in an inconsistent state.");
         println!("Shutting down partition under root path {}... Waiting for {} reader(s) and 1 writer to shut down.",

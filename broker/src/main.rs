@@ -3,7 +3,6 @@
 use actix_web::error::BlockingError;
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use std::sync::Arc;
-
 use crate::broker::Broker;
 use crate::persistence::LogManager;
 use argh::FromArgs;
@@ -105,11 +104,12 @@ async fn main() -> std::io::Result<()> {
     coordinator_client.register_broker(RegisterBrokerRequest { host: args.host.clone(), port: args.port })
         .expect("Failed to register broker to the coordinator service");
 
-    let broker = Broker::new(Arc::new(LogManager::new(args.root_path)), Arc::new(coordinator_client));
-    let broker = web::Data::new(Arc::new(broker));
+    let broker = Arc::new(Broker::new(LogManager::new(args.root_path), Arc::new(coordinator_client)));
+    let broker_clone = Arc::clone(&broker);
+    let broker_data = web::Data::new(broker);
 
     let server = HttpServer::new(move || App::new()
-        .app_data(broker.clone())
+        .app_data(broker_data.clone())
         .service(ping)
         .service(publish).service(publish_raw)
         .service(read_next_batch)
@@ -122,5 +122,14 @@ async fn main() -> std::io::Result<()> {
         .workers(10)
         .bind((args.host, args.port))?
         .run()
-        .await
+        .await?;
+
+    // the server implements graceful shutdown, so if we run after server.await all server references and web::Data references should have been cleaned up,
+    // and we're safe to clean up the state of the application itself
+    match Arc::into_inner(broker_clone) {
+        None => panic!("Unable to shut down the broker, there are still references to it"),
+        Some(broker) => broker.shutdown().expect("Unable to shut down the broker cleanly"),
+    };
+
+    Ok(())
 }
