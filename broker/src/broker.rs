@@ -64,7 +64,7 @@ impl Broker {
     /// - [Error::Io] if the read operation fails due to an IO error
     /// - [Error::Internal] if anything else fails
     pub fn read_next_batch(&self, topic: &str, partition: u32, consumer_group: String) -> Result<Option<RecordBatchWithOffset>, Error> {
-        Ok(match self.read_raw_next_batch(topic, partition, consumer_group)? {
+        Ok(match self.read_next_batch_raw(topic, partition, consumer_group)? {
             None => None,
             Some(IndexedRecord(base_offset, bytes)) => {
                 let record_batch = read_next_batch(&mut Cursor::new(bytes))?;
@@ -79,7 +79,7 @@ impl Broker {
     /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
     /// - [Error::Io] if the read operation fails due to an IO error
     /// - [Error::Internal] if anything else fails
-    pub fn read_raw_next_batch(&self, topic: &str, partition: u32, consumer_group: String) -> Result<Option<IndexedRecord>, Error> {
+    pub fn read_next_batch_raw(&self, topic: &str, partition: u32, consumer_group: String) -> Result<Option<IndexedRecord>, Error> {
         let write_offset = self.coordinator_client.get_write_offset(GetWriteOffsetRequest { topic: topic.to_owned(), partition })?.offset;
         let ack_offset = self.coordinator_client.get_read_offset(GetReadOffsetRequest {
             topic: topic.to_owned(),

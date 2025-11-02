@@ -53,14 +53,14 @@ impl ApiClient {
         self.with_latency_logging(&format!("GET {uri}"), || Self::parse_response(self.http_client.get(&uri)?))
     }
 
-    pub fn post<Req: Serialize>(&self, api: &str, request: Req) -> Result<()> {
+    pub fn post<Req: Serialize>(&self, api: &str, request: Req) -> Result<Response<Body>> {
         let uri = format!("{}{api}", self.url_base);
         self.with_latency_logging(&format!("POST {uri}"), || {
             let mut response = self.http_client.post(&uri, SendBody::from_json(&request)?)?;
             if !response.status().is_success() {
                 Err(Api(response.body_mut().read_to_string()?))
             } else {
-                Ok(())
+                Ok(response)
             }
         })
     }
@@ -96,6 +96,14 @@ impl ApiClient {
         let result = f();
         if self.debug { println!("{} completed in {:?}", description, start.elapsed()); }
         result
+    }
+
+    pub fn get_required_header<'a>(header_key: &str, response: &'a Response<Body>) -> Result<&'a str> {
+        match response.headers().get(header_key) {
+            None => Err(Api(format!("Missing {header_key} header"))),
+            Some(header) => header.to_str()
+                .map_err(|e| Api(format!("Failed to parse {header_key} to string due to {e:?}")))
+        }
     }
 }
 

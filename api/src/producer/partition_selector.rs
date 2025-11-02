@@ -30,8 +30,7 @@ impl PartitionSelector {
     /// # Errors
     /// [Error::CoordinatorApi] or [Error::Ureq] if we failed to make a call to the coordinator service
     pub fn select_partition(&mut self, topic: &str, record: &Record) -> Result<u32> {
-        // in real life we would cache this locally as it rarely changes, but to simplify we'll just fetch it every time, anyway it's all local
-        // so it should not be an issue
+        // this is cached on the client side so we can happily call it many times
         let partition_count = self.coordinator.get_topic(GetTopicRequest { name: topic.to_owned() })
             .map_err(map_coordinator_error)?.partition_count;
 

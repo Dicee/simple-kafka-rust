@@ -3,7 +3,7 @@ use crate::Error::{Api, Ureq};
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
 use mockall::predicate;
 use serde::{Deserialize, Serialize};
-use ureq::http::Response;
+use ureq::http::{HeaderValue, Response};
 use ureq::Body;
 
 const DOMAIN: &str = "localhost:5000";
@@ -30,7 +30,7 @@ fn test_client_post_success() {
         ));
 
     let client = new_client(http_client_mock);
-    assert_that!(client.post(API, DUMMY_REQUEST)).has_ok(());
+    assert_that!(client.post(API, DUMMY_REQUEST)).is_ok();
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn test_client_post_success_use_tls() {
         ));
 
     let client = ApiClient::new_with_http_client(DOMAIN.to_string(), DEBUG, true, Box::new(http_client_mock));
-    assert_that!(client.post(API, DUMMY_REQUEST)).has_ok(());
+    assert_that!(client.post(API, DUMMY_REQUEST)).is_ok();
 }
 
 #[test]
@@ -134,6 +134,39 @@ fn test_client_get_with_response_body_invalid_body() {
         Ureq(e) => assert_that!(e.to_string()).is_equal_to(String::from("json: missing field `some_short` at line 1 column 16")),
         _ => unreachable!(),
     }
+}
+
+#[test]
+fn test_get_required_header_missing() {
+    let response = Response::builder()
+        .body(Body::builder().data(String::new()))
+        .unwrap();
+
+    match ApiClient::get_required_header("some_header", &response) {
+        Err(Api(msg)) => assert_that!(msg).is_equal_to("Missing some_header header".to_owned()),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn test_get_required_header_present_number() {
+    let response = Response::builder()
+        .header("some_header", 25)
+        .body(Body::builder().data(String::new()))
+        .unwrap();
+
+    assert_that!(ApiClient::get_required_header("some_header", &response)).has_ok("25");
+}
+
+#[test]
+fn test_get_required_header_present_string() {
+    let value = "That's right boy";
+    let response = Response::builder()
+        .header("some_header", value)
+        .body(Body::builder().data(String::new()))
+        .unwrap();
+
+    assert_that!(ApiClient::get_required_header("some_header", &response)).has_ok(value);
 }
 
 fn new_client(http_client_mock: MockHttpClient) -> ApiClient {

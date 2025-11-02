@@ -4,9 +4,9 @@ use actix_web::error::BlockingError;
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use std::sync::Arc;
 use crate::broker::Broker;
-use crate::persistence::LogManager;
+use crate::persistence::{IndexedRecord, LogManager};
 use argh::FromArgs;
-use ::broker::model::{PublishRawRequest, PublishResponse, ReadNextBatchRequest, TopicPartition};
+use ::broker::model::{PublishRawRequest, PublishResponse, ReadNextBatchRequest, TopicPartition, BASE_OFFSET_HEADER};
 use broker::Error as BrokerError;
 use coordinator::model::RegisterBrokerRequest;
 use protocol::record::RecordBatch;
@@ -45,7 +45,7 @@ async fn publish(
     query: web::Query<TopicPartition>,
     record_batch: web::Json<RecordBatch>,
 ) -> impl Responder {
-    build_http_response(
+    build_json_http_response(
         web::block(move || { broker.publish(&query.topic, query.partition, record_batch.into_inner()) }).await,
         |base_offset| PublishResponse { base_offset }
     )
@@ -57,7 +57,7 @@ async fn publish_raw(
     query: web::Query<PublishRawRequest>,
     body: web::Bytes,
 ) -> impl Responder {
-    build_http_response(
+    build_json_http_response(
         web::block(move || { broker.publish_raw(&query.topic, query.partition, body.to_vec(), query.record_count) }).await,
         |base_offset| PublishResponse { base_offset }
     )
@@ -73,18 +73,36 @@ async fn read_next_batch(
     request: web::Json<ReadNextBatchRequest>,
 ) -> impl Responder {
     let ReadNextBatchRequest { topic, partition, consumer_group } = request.into_inner();
-    build_http_response(
+    build_json_http_response(
         web::block(move || broker.read_next_batch(&topic, partition, consumer_group)).await,
         |record_batch| record_batch
     )
 }
 
-fn build_http_response<T: Clone, R: Serialize, F>(result: Result<Result<T, BrokerError>, BlockingError>, converter: F) -> HttpResponse
+// Note this is a post because it modifies some state on the server. Ideally the client should just send an offset to read from, but for now we
+// do not have an operation capable of reinitializing the state of the reader on the broker side if we notice that the request offset is not the
+// one the reader is currently tracking. For simplicity's sake, we'll keep the stateful API for now (I want to get things to work end-to-end before
+// working on smaller improvements).
+#[post("/read-next-batch-raw")]
+async fn read_next_batch_raw(
+    broker: web::Data<Arc<Broker>>,
+    request: web::Json<ReadNextBatchRequest>,
+) -> impl Responder {
+    let ReadNextBatchRequest { topic, partition, consumer_group } = request.into_inner();
+    match web::block(move || { broker.read_next_batch_raw(&topic, partition, consumer_group) }).await {
+        Ok(Ok(None)) => HttpResponse::NotFound().finish(),
+        Ok(Ok(Some(IndexedRecord(offset, bytes)))) => HttpResponse::Ok().append_header((BASE_OFFSET_HEADER, offset)).body(bytes),
+        Ok(Err(e)) => convert_broker_error(e),
+        Err(_) => new_internal_failure_response(),
+    }
+}
+
+fn build_json_http_response<T: Clone, R: Serialize, F>(result: Result<Result<T, BrokerError>, BlockingError>, converter: F) -> HttpResponse
 where F: Fn(T) -> R {
     match result {
         Ok(Ok(t)) => HttpResponse::Ok().json(converter(t)),
         Ok(Err(e)) => convert_broker_error(e),
-        Err(_) => HttpResponse::InternalServerError().body("Internal failure with unknown cause"),
+        Err(_) => new_internal_failure_response(),
     }
 }
 
@@ -94,6 +112,10 @@ fn convert_broker_error(e: BrokerError) -> HttpResponse {
         BrokerError::Io(e) => HttpResponse::InternalServerError().body(e.to_string()),
         BrokerError::Internal(msg) => HttpResponse::InternalServerError().body(msg),
     }
+}
+
+fn new_internal_failure_response() -> HttpResponse {
+    HttpResponse::InternalServerError().body("Internal failure with unknown cause")
 }
 
 #[actix_web::main]
@@ -112,7 +134,7 @@ async fn main() -> std::io::Result<()> {
         .app_data(broker_data.clone())
         .service(ping)
         .service(publish).service(publish_raw)
-        .service(read_next_batch)
+        .service(read_next_batch).service(read_next_batch_raw)
     );
 
     println!("Starting server on {}:{}...", args.host, args.port);

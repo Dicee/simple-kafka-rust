@@ -5,6 +5,7 @@ use protocol::record::RecordBatch;
 pub const PUBLISH: &str = "/publish";
 pub const PUBLISH_RAW: &str = "/publish-raw";
 pub const READ_NEXT_BATCH: &str = "/read-next-batch";
+pub const READ_NEXT_BATCH_RAW: &str = "/read-next-batch-raw";
 
 // GET resources
 pub const TOPICS: &str = "/topics";
@@ -16,6 +17,9 @@ pub const NEXT_BATCH: &str = "next-batch";
 pub const TOPIC: &str = "topic";
 pub const PARTITION: &str = "partition";
 pub const RECORD_COUNT: &str = "record_count";
+
+// headers
+pub const BASE_OFFSET_HEADER: &str = "base_offset";
 
 #[derive(Deserialize)]
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
@@ -51,4 +55,11 @@ pub struct ReadNextBatchRequest {
 pub struct RecordBatchWithOffset {
     pub base_offset: u64,
     pub batch: RecordBatch,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Clone, Debug)]
+pub struct RawRecordBatchWithOffset {
+    pub base_offset: u64,
+    pub bytes: Vec<u8>,
 }
