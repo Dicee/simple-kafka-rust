@@ -8,6 +8,7 @@ use ureq::Body;
 
 const DOMAIN: &str = "localhost:5000";
 const USE_TLS: bool = false;
+const DEBUG: bool = true;
 const URI: &str = "http://localhost:5000/dummy";
 const API: &str = "/dummy";
 const DUMMY_REQUEST: DummyRequest = DummyRequest { some_int: 5 };
@@ -48,7 +49,7 @@ fn test_client_post_success_use_tls() {
             .unwrap()
         ));
 
-    let client = ApiClient::new_with_http_client(DOMAIN.to_string(), true, Box::new(http_client_mock));
+    let client = ApiClient::new_with_http_client(DOMAIN.to_string(), DEBUG, true, Box::new(http_client_mock));
     assert_that!(client.post(API, DUMMY_REQUEST)).has_ok(());
 }
 
@@ -136,7 +137,7 @@ fn test_client_get_with_response_body_invalid_body() {
 }
 
 fn new_client(http_client_mock: MockHttpClient) -> ApiClient {
-    ApiClient::new_with_http_client(DOMAIN.to_string(), USE_TLS, Box::new(http_client_mock))
+    ApiClient::new_with_http_client(DOMAIN.to_string(), DEBUG, USE_TLS, Box::new(http_client_mock))
 }
 
 #[derive(Serialize)]

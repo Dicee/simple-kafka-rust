@@ -21,7 +21,7 @@ pub struct ClientImpl {
 impl ClientImpl {
     pub fn new(domain: String) -> Self {
         // for our local testing, we'll always use unsecure HTTP
-        Self { api_client: ApiClient::new(domain, false) }
+        Self { api_client: ApiClient::new(domain, false, false) }
     }
 }
 

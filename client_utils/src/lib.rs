@@ -1,4 +1,6 @@
 use std::io::Cursor;
+use std::rc::Rc;
+use std::time::{Instant, SystemTime};
 use mockall::automock;
 use serde::{Deserialize, Serialize};
 use ureq;
@@ -20,56 +22,65 @@ pub enum Error {
 pub struct ApiClient {
     url_base: String,
     http_client: Box<dyn HttpClient>,
+    debug: bool,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl ApiClient {
-    pub fn new(domain: String, use_tls: bool) -> Self {
+    pub fn new(domain: String, debug: bool, use_tls: bool) -> Self {
         let config = Agent::config_builder()
             // I don't like the default handling because it doesn't return the body, which contains error messages
             .http_status_as_error(false)
             .build();
 
         let http_client = Box::new(HttpClientImpl { config });
-        Self::new_with_http_client(domain, use_tls, http_client)
+        Self::new_with_http_client(domain, debug, use_tls, http_client)
     }
 
     // for testing
-    fn new_with_http_client(domain: String, use_tls: bool, http_client: Box<dyn HttpClient>) -> Self {
+    fn new_with_http_client(domain: String, debug: bool, use_tls: bool, http_client: Box<dyn HttpClient>) -> Self {
         let protocol = if use_tls { "https" } else { "http" };
         Self {
             url_base: format!("{protocol}://{domain}"),
             http_client,
+            debug,
         }
     }
 
     pub fn get<Res>(&self, api: &str) -> Result<Res> where for<'de> Res: Deserialize<'de> {
         let uri = format!("{}{api}", self.url_base);
-        Self::parse_response(self.http_client.get(&uri)?)
+        self.with_latency_logging(&format!("GET {uri}"), || Self::parse_response(self.http_client.get(&uri)?))
     }
 
     pub fn post<Req: Serialize>(&self, api: &str, request: Req) -> Result<()> {
         let uri = format!("{}{api}", self.url_base);
-        let mut response = self.http_client.post(&uri, SendBody::from_json(&request)?)?;
-        if !response.status().is_success() {
-            Err(Api(response.body_mut().read_to_string()?))
-        } else {
-            Ok(())
-        }
+        self.with_latency_logging(&format!("POST {uri}"), || {
+            let mut response = self.http_client.post(&uri, SendBody::from_json(&request)?)?;
+            if !response.status().is_success() {
+                Err(Api(response.body_mut().read_to_string()?))
+            } else {
+                Ok(())
+            }
+        })
     }
 
     pub fn post_raw_and_parse<Res>(&self, api: &str, bytes: Vec<u8>) -> Result<Res>
     where for<'de> Res: Deserialize<'de> {
         let uri = format!("{}{api}", self.url_base);
-        let body = SendBody::from_owned_reader(Cursor::new(bytes));
-        Self::parse_response(self.http_client.post(&uri, body)?)
+        self.with_latency_logging(&format!("POST {uri}"), || {
+            let mut cursor = Cursor::new(&bytes);
+            let body = SendBody::from_reader(&mut cursor);
+            Self::parse_response(self.http_client.post(&uri, body)?)
+        })
     }
 
     pub fn post_and_parse<Req: Serialize, Res>(&self, api: &str, request: Req) -> Result<Res>
     where for<'de> Res: Deserialize<'de> {
         let uri = format!("{}{api}", self.url_base);
-        Self::parse_response(self.http_client.post(&uri, SendBody::from_json(&request)?)?)
+        self.with_latency_logging(&format!("POST {uri}"), || {
+            Self::parse_response(self.http_client.post(&uri, SendBody::from_json(&request)?)?)
+        })
     }
 
     fn parse_response<Res>(mut response: Response<Body>) -> Result<Res> where for<'de> Res: Deserialize<'de> {
@@ -78,6 +89,13 @@ impl ApiClient {
         } else {
             Ok(response.body_mut().read_json()?)
         }
+    }
+
+    fn with_latency_logging<T>(&self, description: &str, f: impl Fn() -> T) -> T {
+        let start = Instant::now();
+        let result = f();
+        if self.debug { println!("{} completed in {:?}", description, start.elapsed()); }
+        result
     }
 }
 
