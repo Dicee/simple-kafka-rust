@@ -4,3 +4,6 @@ pub mod producer;
 pub mod consumer;
 
 pub mod common;
+
+#[cfg(test)]
+mod mock_utils;

@@ -46,7 +46,7 @@ impl Client for ClientImpl {
             None => None,
             Some(header) => Some(header.parse().map_err(|e| Error::Api(format!("Failed to parse {READ_OFFSET_HEADER} to u64 due to {e:?}")))?)
         };
-        
+
         Ok(PollBatchesRawResponse {
             ack_read_offset,
             bytes: response.into_body().read_to_vec()?,

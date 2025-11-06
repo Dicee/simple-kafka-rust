@@ -8,7 +8,7 @@ use protocol::record::{read_next_batch, Record, RecordBatch};
 use std::io::Cursor;
 use std::sync::Arc;
 use std::vec;
-use crate::producer::mock_utils::{eq_serialized_batch, expect_publish_raw, expect_list_brokers, set_up_broker_resolver};
+use crate::mock_utils::{eq_serialized_batch, expect_publish_raw, expect_list_brokers, set_up_broker_resolver};
 
 const TOPIC1: &'static str = "topic1";
 const TOPIC2: &'static str = "topic2";

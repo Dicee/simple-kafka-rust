@@ -7,8 +7,8 @@ use crate::model::*;
 use client_utils::Result;
 
 pub struct DummyClient {
-    pub write_offsets: Mutex<HashMap<TopicPartition, u64>>,
-    pub read_offsets: Mutex<HashMap<TopicPartitionConsumer, u64>>,
+    write_offsets: Mutex<HashMap<TopicPartition, u64>>,
+    read_offsets: Mutex<HashMap<TopicPartitionConsumer, u64>>,
 }
 
 impl DummyClient {

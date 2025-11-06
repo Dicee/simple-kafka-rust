@@ -43,14 +43,6 @@ pub struct PublishResponse {
 }
 
 #[derive(Serialize, Deserialize)]
-#[derive(Eq, PartialEq, Debug)]
-pub struct ReadNextBatchRequest {
-    pub topic: String,
-    pub partition: u32,
-    pub consumer_group: String,
-}
-
-#[derive(Serialize, Deserialize)]
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct RecordBatchWithOffset {
     pub base_offset: u64,
@@ -67,14 +59,14 @@ pub struct PollBatchesRequest {
 }
 
 #[derive(Serialize, Deserialize)]
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub struct PollBatchesRawResponse {
     pub ack_read_offset: Option<u64>,
     pub bytes: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize)]
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub struct PollConfig {
     pub max_wait: Duration,
     pub max_batches: usize,

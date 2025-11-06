@@ -1,5 +1,5 @@
 use super::*;
-use crate::producer::mock_utils::expect_get_topic;
+use crate::mock_utils::expect_get_topic;
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
 use coordinator::model::GetTopicRequest;
 use mockall::predicate;

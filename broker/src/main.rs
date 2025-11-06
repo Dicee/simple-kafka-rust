@@ -1,17 +1,17 @@
 //! This crate provides all the logic and binaries necessary to run a broker on a node.
 
+use crate::broker::Broker;
+use crate::persistence::LogManager;
 use actix_web::error::BlockingError;
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
-use std::sync::Arc;
-use crate::broker::Broker;
-use crate::persistence::{IndexedRecord, LogManager};
 use argh::FromArgs;
-use ::broker::model::{PollBatchesRequest, PublishRawRequest, PublishResponse, ReadNextBatchRequest, TopicPartition, READ_OFFSET_HEADER};
+use ::broker::model::{PollBatchesRequest, PublishRawRequest, PublishResponse, TopicPartition, READ_OFFSET_HEADER};
 use broker::Error as BrokerError;
 use coordinator::model::RegisterBrokerRequest;
+use coordinator::Client;
 use protocol::record::RecordBatch;
 use serde::Serialize;
-use coordinator::Client;
+use std::sync::Arc;
 
 mod broker;
 mod persistence;

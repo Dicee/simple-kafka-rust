@@ -1,7 +1,7 @@
 use std::ops::Mul;
 use crate::common::Config;
 use crate::producer;
-use crate::producer::mock_utils::{expect_get_topic, expect_list_brokers, expect_publish_raw_ignoring_timestamps, set_up_broker_resolver};
+use crate::mock_utils::{expect_get_topic, expect_list_brokers, expect_publish_raw_ignoring_timestamps, set_up_broker_resolver};
 use protocol::record::{Record, RecordBatch};
 use std::sync::Arc;
 use std::thread;

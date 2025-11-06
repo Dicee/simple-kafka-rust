@@ -9,7 +9,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{atomic, Arc, Condvar, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::{Instant, SystemTime};
+use std::time::Instant;
 use crate::common::broker_resolver::BrokerResolver;
 
 mod batch_publisher;
@@ -17,9 +17,6 @@ mod partition_selector;
 
 #[cfg(test)]
 mod producer_test;
-
-#[cfg(test)]
-mod mock_utils;
 
 /// This client handles the batching of individual records. It selects the partition to send the record to based on the record's key, if present, or in a
 /// round-robin fashion otherwise. Batches can be flushed by two separate mechanisms: when the max size is reached, immediately after the last record was
