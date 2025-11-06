@@ -82,6 +82,7 @@ impl Broker {
             if eof {
                 let timeout = poll_config.max_wait.sub(elapsed);
                 write_notifier.wait_new_write(timeout);
+                if start.elapsed().ge(&poll_config.max_wait) { break; }
             }
         }
 

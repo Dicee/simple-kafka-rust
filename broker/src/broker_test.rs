@@ -350,6 +350,39 @@ fn test_poll_batches_waits_to_find_enough_batches() {
 }
 
 #[test]
+#[timeout(150)]
+fn test_poll_batches_multiple_waiters() {
+    let temp_dir = TempTestDir::create();
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
+    let broker = Arc::new(new_broker(&temp_dir, &coordinator_client));
+    let broker_clone = Arc::clone(&broker);
+
+    let batch_1 = new_record_batch(0, vec![new_record(0, 0)]);
+    let batch_1_clone = batch_1.clone();
+
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(90));
+        broker_clone.publish(TOPIC, PARTITION, batch_1_clone).unwrap();
+    });
+
+    let broker_clone = Arc::clone(&broker);
+    let batch_1_clone = batch_1.clone();
+
+    let consumer1 = thread::spawn(move || {
+        assert_that!(broker_clone.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG))
+            .has_ok(vec![IndexedRecord(0, serialize_batch(batch_1_clone))]);
+    });
+
+    let consumer2 = thread::spawn(move || {
+        assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, "other_group".to_owned(), &POLL_CONFIG))
+            .has_ok(vec![IndexedRecord(0, serialize_batch(batch_1))]);
+    });
+
+    consumer1.join().unwrap();
+    consumer2.join().unwrap();
+}
+
+#[test]
 #[timeout(25)]
 fn test_poll_batches_returns_immediately_if_enough_batches_present() {
     let temp_dir = TempTestDir::create();

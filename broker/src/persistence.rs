@@ -267,7 +267,7 @@ impl WriteNotifier {
     /// Wakes up all threads that are currently waiting for new data to be written. Private as only the persistence layer is the one that knows when
     /// a write happened.
     fn notify_readers(&self) {
-        self.cvar.notify_one(); // notify ALL because there might be multiple consumer groups waiting for new data to be written
+        self.cvar.notify_all(); // notify ALL because there might be multiple consumer groups waiting for new data to be written
     }
 
     /// Waits for a new write to happen on the partition associated to this [WriteNotifier], with the provided timeout.
