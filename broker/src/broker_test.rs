@@ -1,15 +1,17 @@
+use std::io::Cursor;
 use crate::broker::Error::Coordinator;
-use crate::broker::{Broker, Error, RecordBatchWithOffset};
+use crate::broker::{Broker, Error};
 use crate::persistence::{indexing, AtomicWriteAction, IndexedRecord, LogManager, RotatingAppendOnlyLog};
 use assertor::{assert_that, EqualityAssertion, OptionAssertion, ResultAssertion};
+use broker::model::{PollBatchesRawResponse, PollConfig, RecordBatchWithOffset};
 use coordinator::model::*;
 use file_test_utils::TempTestDir;
+use ntest_timeout::timeout;
 use protocol::record::{serialize_batch, serialize_batch_into, Header, Record, RecordBatch};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
-use ntest_timeout::timeout;
-use broker::model::PollConfig;
+use std::time::{Duration};
+use coordinator::Client as CoordinatorClient;
 
 const TOPIC: &str = "chess-news";
 const PARTITION: u32 = 116;
@@ -39,13 +41,13 @@ fn test_serialization_round_trip_from_first_offset() {
     broker.publish(TOPIC, PARTITION, batch_2.clone()).unwrap();
     assert_write_offset_is(coordinator_client.as_ref(), Some(2));
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()).unwrap())
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None).unwrap())
         .has_value(RecordBatchWithOffset { base_offset: 0, batch: batch_1 });
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()).unwrap())
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None).unwrap())
         .has_value(RecordBatchWithOffset { base_offset: 2, batch: batch_2 });
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()).unwrap()).is_none();
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None).unwrap()).is_none();
 
     broker.shutdown().unwrap();
 }
@@ -64,7 +66,7 @@ fn test_write_more_than_indexing_threshold() {
 
     for i in 0..2 * indexing::MAX_INDEX_GAP + 5 {
         let batch = new_record_batch(i, vec![new_record(i, 1), new_record(i, 2)]);
-        assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()).unwrap())
+        assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None).unwrap())
             .has_value(RecordBatchWithOffset { base_offset: i * 2, batch });
     }
 
@@ -114,12 +116,13 @@ fn test_read_next_batch_initialize_from_exact_base_offset() {
     broker.publish(TOPIC, PARTITION, batch_1.clone()).unwrap();
     broker.publish(TOPIC, PARTITION, batch_2.clone()).unwrap();
 
-    ack_read_offset(coordinator_client, 2);
+    let read_offset = Some(2);
+    ack_read_offset(coordinator_client, read_offset.unwrap());
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), read_offset))
         .has_ok(Some(RecordBatchWithOffset { base_offset: 3, batch: batch_2 }));
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), read_offset))
         .has_ok(None);
     
     broker.shutdown().unwrap();
@@ -147,12 +150,13 @@ fn test_read_next_batch_initialize_with_offset_within_a_batch() {
     broker.publish(TOPIC, PARTITION, batch_1.clone()).unwrap();
     broker.publish(TOPIC, PARTITION, batch_2.clone()).unwrap();
 
-    ack_read_offset(coordinator_client, 2);
+    let read_offset = Some(2);
+    ack_read_offset(coordinator_client, read_offset.unwrap());
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), read_offset))
         .has_ok(Some(RecordBatchWithOffset { base_offset: 2, batch: batch_2 }));
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), read_offset))
         .has_ok(None);
 
     broker.shutdown().unwrap();
@@ -183,15 +187,16 @@ fn test_read_next_batch_initialize_with_offset_at_the_end_of_a_batch() {
     broker.publish(TOPIC, PARTITION, batch_2.clone()).unwrap();
     broker.publish(TOPIC, PARTITION, batch_3.clone()).unwrap();
 
-    ack_read_offset(coordinator_client, 2);
+    let read_offset = Some(2);
+    ack_read_offset(coordinator_client, read_offset.unwrap());
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), read_offset))
         .has_ok(Some(RecordBatchWithOffset { base_offset: 1, batch: batch_2 }));
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), read_offset))
         .has_ok(Some(RecordBatchWithOffset { base_offset: 4, batch: batch_3 }));
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), read_offset))
         .has_ok(None);
 
     broker.shutdown().unwrap();
@@ -203,17 +208,17 @@ fn test_read_next_batch_initialize_before_any_data_is_written() {
     let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
     let broker = new_broker(&temp_dir, &coordinator_client);
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None))
         .has_ok(None);
 
     let base_timestamp = 14;
     let batch = new_record_batch(base_timestamp, vec![new_record(base_timestamp, 1)]);
     broker.publish(TOPIC, PARTITION, batch.clone()).unwrap();
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None))
         .has_ok(Some(RecordBatchWithOffset { base_offset: 0, batch }));
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None))
         .has_ok(None);
 
     broker.shutdown().unwrap();
@@ -236,7 +241,7 @@ fn test_read_next_batch_initialize_while_first_batch_is_being_written() {
     let log_manager = LogManager::new(temp_dir.path_as_str().to_owned());
     log_manager.atomic_write(TOPIC, PARTITION, WriteAndCommit(0, bytes[0..13].to_vec())).unwrap();
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None))
         .has_ok(None);
 
     log_manager.atomic_write(TOPIC, PARTITION, WriteAndCommit(0, bytes[13..].to_vec())).unwrap();
@@ -246,10 +251,10 @@ fn test_read_next_batch_initialize_while_first_batch_is_being_written() {
         inc: 1,
     }).unwrap();
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None))
         .has_ok(Some(RecordBatchWithOffset { base_offset: 0, batch }));
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None))
         .has_ok(None);
 
     broker.shutdown().unwrap();
@@ -283,10 +288,10 @@ fn test_read_next_batch_while_a_batch_is_being_written() {
     let log_manager = LogManager::new(temp_dir.path_as_str().to_owned());
     log_manager.atomic_write(TOPIC, PARTITION, WriteAndCommit(0, bytes[0..13].to_vec())).unwrap();
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None))
         .has_ok(Some(RecordBatchWithOffset { base_offset: 0, batch: batch_1 }));
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None))
         .has_ok(None);
 
     log_manager.atomic_write(TOPIC, PARTITION, WriteAndCommit(0, bytes[13..].to_vec())).unwrap();
@@ -296,10 +301,10 @@ fn test_read_next_batch_while_a_batch_is_being_written() {
         inc: 1,
     }).unwrap();
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None))
         .has_ok(Some(RecordBatchWithOffset { base_offset: 2, batch: batch_2 }));
 
-    assert_that!(broker.read_next_batch(TOPIC, PARTITION, CONSUMER_GROUP.to_owned()))
+    assert_that!(read_next_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), None))
         .has_ok(None);
 
     broker.shutdown().unwrap();
@@ -309,10 +314,21 @@ fn test_read_next_batch_while_a_batch_is_being_written() {
 #[timeout(150)]
 fn test_poll_batches_no_records() {
     let temp_dir = TempTestDir::create();
-    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
+    let dummy_coordinator = coordinator::DummyClient::new();
+
+    let read_offset = 9;
+    dummy_coordinator.ack_read_offset(AckReadOffsetRequest {
+        topic: TOPIC.to_owned(),
+        partition: PARTITION,
+        consumer_group: CONSUMER_GROUP.to_owned(),
+        offset: read_offset, // just to prove that we return the ack read offset
+    }).unwrap();
+
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(dummy_coordinator);
     let broker = new_broker(&temp_dir, &coordinator_client);
 
-    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG)).has_ok(vec![]);
+    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG))
+        .has_ok(to_poll_batches_raw_response(Some(read_offset), vec![]));
 }
 
 #[test]
@@ -342,11 +358,11 @@ fn test_poll_batches_waits_to_find_enough_batches() {
         broker_clone.publish(TOPIC, PARTITION, batch_3).unwrap();
     });
 
-    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG)).has_ok(vec![
+    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG)).has_ok(to_poll_batches_raw_response(None, vec![
             IndexedRecord(0, serialize_batch(batch_1_clone)),
             IndexedRecord(1, serialize_batch(batch_2_clone)),
             IndexedRecord(3, serialize_batch(batch_3_clone)),
-    ]);
+    ]));
 }
 
 #[test]
@@ -370,12 +386,12 @@ fn test_poll_batches_multiple_waiters() {
 
     let consumer1 = thread::spawn(move || {
         assert_that!(broker_clone.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG))
-            .has_ok(vec![IndexedRecord(0, serialize_batch(batch_1_clone))]);
+            .has_ok(to_poll_batches_raw_response(None, vec![IndexedRecord(0, serialize_batch(batch_1_clone))]));
     });
 
     let consumer2 = thread::spawn(move || {
         assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, "other_group".to_owned(), &POLL_CONFIG))
-            .has_ok(vec![IndexedRecord(0, serialize_batch(batch_1))]);
+            .has_ok(to_poll_batches_raw_response(None, vec![IndexedRecord(0, serialize_batch(batch_1))]));
     });
 
     consumer1.join().unwrap();
@@ -386,7 +402,9 @@ fn test_poll_batches_multiple_waiters() {
 #[timeout(25)]
 fn test_poll_batches_returns_immediately_if_enough_batches_present() {
     let temp_dir = TempTestDir::create();
-    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
+    let dummy_coordinator = coordinator::DummyClient::new();
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(dummy_coordinator);
+
     let broker = Arc::new(new_broker(&temp_dir, &coordinator_client));
     let broker_clone = Arc::clone(&broker);
 
@@ -398,11 +416,11 @@ fn test_poll_batches_returns_immediately_if_enough_batches_present() {
     broker_clone.publish(TOPIC, PARTITION, batch_2.clone()).unwrap();
     broker_clone.publish(TOPIC, PARTITION, batch_3.clone()).unwrap();
 
-    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG)).has_ok(vec![
-        IndexedRecord(0, serialize_batch(batch_1)),
-        IndexedRecord(1, serialize_batch(batch_2)),
-        IndexedRecord(3, serialize_batch(batch_3)),
-    ]);
+    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG)).has_ok(to_poll_batches_raw_response(None, vec![
+            IndexedRecord(0, serialize_batch(batch_1)),
+            IndexedRecord(1, serialize_batch(batch_2)),
+            IndexedRecord(3, serialize_batch(batch_3)),
+    ]));
 }
 
 #[test]
@@ -432,13 +450,17 @@ fn test_poll_batches_returns_fewer_batches_if_timeout_exceeded() {
         broker_clone.publish(TOPIC, PARTITION, batch_3).unwrap();
     });
 
-    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG)).has_ok(vec![
-        IndexedRecord(0, serialize_batch(batch_1_clone)),
-        IndexedRecord(1, serialize_batch(batch_2_clone))
-    ]);
+    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG))
+        .has_ok(to_poll_batches_raw_response(
+            None,
+            vec![
+                IndexedRecord(0, serialize_batch(batch_1_clone)),
+                IndexedRecord(1, serialize_batch(batch_2_clone)),
+            ])
+        );
 
     assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG))
-        .has_ok(vec![IndexedRecord(3, serialize_batch(batch_3_clone))]);
+        .has_ok(to_poll_batches_raw_response(None, vec![IndexedRecord(3, serialize_batch(batch_3_clone))]));
 }
 
 fn ack_read_offset(coordinator_client: Arc<dyn coordinator::Client>, offset: u64) {
@@ -450,9 +472,29 @@ fn ack_read_offset(coordinator_client: Arc<dyn coordinator::Client>, offset: u64
     }).unwrap();
 }
 
+fn read_next_batch(broker: &Broker, topic: &str, partition: u32, consumer_group: String, ack_read_offset: Option<u64>) -> Result<Option<RecordBatchWithOffset>, Error> {
+    Ok(match broker.read_next_batch_raw(topic, partition, consumer_group, ack_read_offset)? {
+        None => None,
+        Some(IndexedRecord(base_offset,bytes)) => {
+            let record_batch = protocol::record::read_next_batch(&mut Cursor::new(bytes))?;
+            Some(RecordBatchWithOffset { batch: record_batch, base_offset })
+        }
+    })
+}
+
 fn assert_write_offset_is(dummy_coordinator: &dyn coordinator::Client, offset: Option<u64>) {
     assert_that!(dummy_coordinator.get_write_offset(GetWriteOffsetRequest { topic: TOPIC.to_owned(), partition: PARTITION }))
         .has_ok(GetWriteOffsetResponse { offset });
+}
+
+fn to_poll_batches_raw_response(ack_read_offset: Option<u64>, indexed_records: Vec<IndexedRecord>) -> PollBatchesRawResponse {
+    let mut bytes = Vec::new();
+    for IndexedRecord(base_offset, record_bytes) in indexed_records {
+        bytes.extend(base_offset.to_le_bytes());
+        bytes.extend(record_bytes);
+    }
+
+    PollBatchesRawResponse { ack_read_offset, bytes }
 }
 
 fn new_record_batch(base_timestamp: u64, records: Vec<Record>) -> RecordBatch {

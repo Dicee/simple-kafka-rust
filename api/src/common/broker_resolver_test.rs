@@ -1,10 +1,11 @@
 use crate::common::broker_resolver::{BrokerClientFactory, BrokerResolver};
 use assertor::{assert_that, EqualityAssertion, IteratorAssertion, ResultAssertion};
-use broker::model::{PublishResponse, RecordBatchWithOffset};
+use broker::model::{PollBatchesRawResponse, PollConfig, PublishResponse};
 use coordinator::model::{HostAndPort, ListBrokersResponse};
 use protocol::record::RecordBatch;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[test]
 #[should_panic(expected = "No brokers are registered to the coordinator")]
@@ -75,9 +76,10 @@ fn test_client_for() {
 fn select_client_for(broker_resolver: &BrokerResolver, partition: u32) {
     let topic = String::from("topic");
     let consumer_group = String::from("consumer");
+    let poll_config = PollConfig { max_batches: 1, max_wait: Duration::from_secs(1) };
 
     broker_resolver.client_for(partition)
-        .read_next_batch(topic.clone(), partition, consumer_group.clone())
+        .poll_batches_raw(topic, partition, consumer_group, poll_config)
         .unwrap();
 }
 
@@ -104,10 +106,10 @@ struct DummyBrokerClient {
 }
 
 impl broker::Client for DummyBrokerClient {
-    fn read_next_batch(&self, _: String, partition: u32, _: String) -> broker::Result<RecordBatchWithOffset> {
+    fn poll_batches_raw(&self, _: String, partition: u32, _: String, _: PollConfig) -> broker::Result<PollBatchesRawResponse> {
         let mut calls = self.calls.lock().unwrap();
         calls.entry((self.host.clone(), partition)).and_modify(|c| *c += 1).or_insert_with(|| 1);
-        Ok(RecordBatchWithOffset { base_offset: 0, batch: RecordBatch { protocol_version: 0, base_timestamp: 0, records: vec![] } })
+        Ok(PollBatchesRawResponse { ack_read_offset: Some(17), bytes: vec![]  })
     }
 
     fn publish(&self, _: &str, _: u32, _: RecordBatch) -> broker::Result<PublishResponse> { unimplemented!() }

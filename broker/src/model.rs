@@ -6,8 +6,6 @@ use protocol::record::RecordBatch;
 pub const PUBLISH: &str = "/publish";
 pub const PUBLISH_RAW: &str = "/publish-raw";
 pub const POLL_BATCHES_RAW: &str = "/poll-batches-raw";
-pub const READ_NEXT_BATCH: &str = "/read-next-batch";
-pub const READ_NEXT_BATCH_RAW: &str = "/read-next-batch-raw";
 
 // GET resources
 pub const TOPICS: &str = "/topics";
@@ -21,7 +19,7 @@ pub const PARTITION: &str = "partition";
 pub const RECORD_COUNT: &str = "record_count";
 
 // headers
-pub const BASE_OFFSET_HEADER: &str = "base_offset";
+pub const READ_OFFSET_HEADER: &str = "ack-read-offset";
 
 #[derive(Deserialize)]
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
@@ -60,19 +58,19 @@ pub struct RecordBatchWithOffset {
 }
 
 #[derive(Serialize, Deserialize)]
-#[derive(Eq, PartialEq, Clone, Debug)]
-pub struct RawRecordBatchWithOffset {
-    pub base_offset: u64,
-    pub bytes: Vec<u8>,
-}
-
-#[derive(Serialize, Deserialize)]
 #[derive(Eq, PartialEq, Debug)]
 pub struct PollBatchesRequest {
     pub topic: String,
     pub partition: u32,
     pub consumer_group: String,
     pub poll_config: PollConfig,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Debug)]
+pub struct PollBatchesRawResponse {
+    pub ack_read_offset: Option<u64>,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize)]

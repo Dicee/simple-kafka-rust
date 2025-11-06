@@ -137,6 +137,36 @@ fn test_client_get_with_response_body_invalid_body() {
 }
 
 #[test]
+fn test_get_optional_header_missing() {
+    let response = Response::builder()
+        .body(Body::builder().data(String::new()))
+        .unwrap();
+
+    assert_that!(ApiClient::get_optional_header("some_header", &response)).has_ok(None);
+}
+
+#[test]
+fn test_get_optional_header_present_number() {
+    let response = Response::builder()
+        .header("some_header", 25)
+        .body(Body::builder().data(String::new()))
+        .unwrap();
+
+    assert_that!(ApiClient::get_optional_header("some_header", &response)).has_ok(Some("25"));
+}
+
+#[test]
+fn test_get_optional_header_present_string() {
+    let value = "That's right boy";
+    let response = Response::builder()
+        .header("some_header", value)
+        .body(Body::builder().data(String::new()))
+        .unwrap();
+
+    assert_that!(ApiClient::get_optional_header("some_header", &response)).has_ok(Some(value));
+}
+
+#[test]
 fn test_get_required_header_missing() {
     let response = Response::builder()
         .body(Body::builder().data(String::new()))

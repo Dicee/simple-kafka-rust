@@ -1,10 +1,9 @@
 use crate::broker::Error::{Coordinator, Io};
 use crate::persistence::indexing::{self, IndexLookupResult};
 use crate::persistence::{AtomicReadAction, AtomicWriteAction, IndexedRecord, LogManager, RotatingAppendOnlyLog, RotatingLogReader};
-use broker::model::{PollConfig, RecordBatchWithOffset};
+use broker::model::{PollBatchesRawResponse, PollConfig};
 use coordinator::model::{GetReadOffsetRequest, GetWriteOffsetRequest, IncrementWriteOffsetRequest};
-use protocol::record::{deserialize_batch_metadata, read_batch_metadata, read_next_batch, serialize_batch, RecordBatch, BATCH_METADATA_SIZE};
-use std::io::Cursor;
+use protocol::record::{deserialize_batch_metadata, read_batch_metadata, serialize_batch, RecordBatch, BATCH_METADATA_SIZE};
 use std::ops::Sub;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -59,23 +58,35 @@ impl Broker {
         })
     }
 
-    /// Polls at most for the number of batches specified in the poll config, for a maximum amount of time configured in the same config. If the max duration
-    /// is met before we find enough batches to max it out, we return whatever has been read so far, which could be nothing, in which case the vector will be
-    /// empty.
-    pub fn poll_batches_raw(&self, topic: &str, partition: u32, consumer_group: String, poll_config: &PollConfig) -> Result<Vec<IndexedRecord>, Error> {
+    /// Polls, without decoding, at most for the number of batches specified in the poll config, for a maximum amount of time configured in the same config.
+    /// If the max duration is met before we find enough batches to max it out, we return whatever has been read so far, which could be nothing, in which case
+    /// the vector will be empty.
+    pub fn poll_batches_raw(&self, topic: &str, partition: u32, consumer_group: String, poll_config: &PollConfig) -> Result<PollBatchesRawResponse, Error> {
         let start = Instant::now();
-        let mut indexed_records = Vec::new();
         let write_notifier = self.log_manager.get_write_notifier(topic, partition)?;
+        let ack_read_offset = self.coordinator_client.get_read_offset(GetReadOffsetRequest {
+            topic: topic.to_owned(),
+            partition,
+            consumer_group: consumer_group.clone()
+        })?.offset;
+
+        let mut bytes = Vec::new();
+        let mut batch_count = 0;
 
         loop {
             let mut eof = false;
-            match self.read_next_batch_raw(topic, partition, consumer_group.clone())? {
+            match self.read_next_batch_raw(topic, partition, consumer_group.clone(), ack_read_offset)? {
                 None => eof = true,
-                Some(r) => indexed_records.push(r),
+                Some(IndexedRecord(base_offset, batch_bytes)) => {
+                    bytes.extend(base_offset.to_le_bytes());
+                    bytes.extend(batch_bytes);
+
+                    batch_count += 1;
+                },
             }
             
             let elapsed = start.elapsed();
-            if indexed_records.len() == poll_config.max_batches || elapsed.ge(&poll_config.max_wait) {
+            if batch_count == poll_config.max_batches || elapsed.ge(&poll_config.max_wait) {
                 break;
             }
 
@@ -86,40 +97,13 @@ impl Broker {
             }
         }
 
-        Ok(indexed_records)
+        Ok(PollBatchesRawResponse { ack_read_offset, bytes })
     }
 
-    /// Reads and deserializes the next batch for the given topic, partition and consumer group. This method is meant for ease of testing
-    /// at the moment and will be removed later, because deserialization is normally performed by the consumer (which isn't written yet!).
-    /// # Errors
-    /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
-    /// - [Error::Io] if the read operation fails due to an IO error
-    /// - [Error::Internal] if anything else fails
-    pub fn read_next_batch(&self, topic: &str, partition: u32, consumer_group: String) -> Result<Option<RecordBatchWithOffset>, Error> {
-        Ok(match self.read_next_batch_raw(topic, partition, consumer_group)? {
-            None => None,
-            Some(IndexedRecord(base_offset, bytes)) => {
-                let record_batch = read_next_batch(&mut Cursor::new(bytes))?;
-                Some(RecordBatchWithOffset { batch: record_batch, base_offset })
-            }
-        })
-    }
-
-    /// Reads, without decoding, the next batch for the given topic, partition and consumer group. This method is meant for ease of testing
-    /// at the moment and will be removed later, because deserialization is normally performed by the consumer (which isn't written yet!).
-    /// # Errors
-    /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
-    /// - [Error::Io] if the read operation fails due to an IO error
-    /// - [Error::Internal] if anything else fails
-    pub fn read_next_batch_raw(&self, topic: &str, partition: u32, consumer_group: String) -> Result<Option<IndexedRecord>, Error> {
+    fn read_next_batch_raw(&self, topic: &str, partition: u32, consumer_group: String, ack_read_offset: Option<u64>) -> Result<Option<IndexedRecord>, Error> {
         let write_offset = self.coordinator_client.get_write_offset(GetWriteOffsetRequest { topic: topic.to_owned(), partition })?.offset;
-        let ack_offset = self.coordinator_client.get_read_offset(GetReadOffsetRequest {
-            topic: topic.to_owned(),
-            partition,
-            consumer_group: consumer_group.clone()
-        })?.offset;
 
-        let action = ReadNextBatch { write_offset, read_ack_offset: ack_offset };
+        let action = ReadNextBatch { write_offset, ack_read_offset };
         let indexed_record = self.log_manager.atomic_read(topic, partition, consumer_group, action)?;
 
         Ok(if indexed_record.1.is_empty() { None } else { Some(indexed_record) })
@@ -164,12 +148,12 @@ impl AtomicWriteAction for WriteAndCommit {
 
 struct ReadNextBatch {
     write_offset: Option<u64>,
-    read_ack_offset: Option<u64>,
+    ack_read_offset: Option<u64>,
 }
 
 impl AtomicReadAction for ReadNextBatch {
     fn initialize(&self, root_path: &str) -> Result<RotatingLogReader, Error> {
-        Ok(match self.read_ack_offset {
+        Ok(match self.ack_read_offset {
             None => RotatingLogReader::open_for_index(root_path.to_owned(), 0)?,
             Some(ack_offset) => {
                 let record_offset = ack_offset + 1;

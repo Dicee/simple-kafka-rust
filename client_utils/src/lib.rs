@@ -99,11 +99,18 @@ impl ApiClient {
     }
 
     pub fn get_required_header<'a>(header_key: &str, response: &'a Response<Body>) -> Result<&'a str> {
-        match response.headers().get(header_key) {
+        match Self::get_optional_header(header_key, response)? {
             None => Err(Api(format!("Missing {header_key} header"))),
-            Some(header) => header.to_str()
-                .map_err(|e| Api(format!("Failed to parse {header_key} to string due to {e:?}")))
+            Some(header) => Ok(header)
         }
+    }
+
+    pub fn get_optional_header<'a>(header_key: &str, response: &'a Response<Body>) -> Result<Option<&'a str>> {
+        Ok(match response.headers().get(header_key) {
+            None => None,
+            Some(header) => Some(header.to_str()
+                .map_err(|e| Api(format!("Failed to parse {header_key} to string due to {e:?}")))?)
+        })
     }
 }
 
