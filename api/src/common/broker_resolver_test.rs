@@ -1,5 +1,5 @@
 use crate::common::broker_resolver::{BrokerClientFactory, BrokerResolver};
-use assertor::{assert_that, EqualityAssertion, IteratorAssertion, ResultAssertion};
+use assertor::{assert_that, EqualityAssertion, IteratorAssertion};
 use broker::model::{PollBatchesRawResponse, PollConfig, PublishResponse};
 use coordinator::model::{HostAndPort, ListBrokersResponse};
 use protocol::record::RecordBatch;

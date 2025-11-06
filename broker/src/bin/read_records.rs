@@ -25,17 +25,17 @@ fn main() -> io::Result<()> {
         let mut offset_bytes = [0u8; 8];
         match reader.read(&mut offset_bytes)? {
             0 => break,
-            0..8 => return Err(io::Error::new(ErrorKind::UnexpectedEof, "Could not read next offset")),
+            1..8 => return Err(io::Error::new(ErrorKind::UnexpectedEof, "Could not read next offset")),
             _ => (),
         }
 
         let base_offset = u64::from_le_bytes(offset_bytes);
         let batch = read_next_batch(&mut reader)?;
         let json_batch = serde_json::to_string(&RecordBatchWithOffset { base_offset, batch })
-            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
 
         stdout().write_all(json_batch.as_bytes())?;
-        stdout().write(b"\n")?;
+        stdout().write_all(b"\n")?;
     }
 
     stdout().flush()

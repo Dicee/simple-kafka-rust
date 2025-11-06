@@ -113,7 +113,8 @@ impl Broker {
     pub fn shutdown(self) -> thread::Result<()> {
         println!("Shutting down broker...");
         self.log_manager.shutdown()?;
-        Ok(println!("Broker shutdown complete!"))
+        println!("Broker shutdown complete!");
+        Ok(())
     }
 }
 

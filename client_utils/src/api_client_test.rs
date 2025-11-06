@@ -3,7 +3,7 @@ use crate::Error::{Api, Ureq};
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
 use mockall::predicate;
 use serde::{Deserialize, Serialize};
-use ureq::http::{HeaderValue, Response};
+use ureq::http::Response;
 use ureq::Body;
 
 const DOMAIN: &str = "localhost:5000";

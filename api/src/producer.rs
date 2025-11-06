@@ -169,7 +169,7 @@ impl BatchReaperTask {
 }
 
 fn publish_batch_async(protocol_version: u8, topic_partition: TopicPartition, records: Vec<Record>, batch_publisher: &BatchPublisher) {
-    assert!(records.len() > 0); // only called internally so it seems fair to panic, it cannot be a user error
+    assert!(!records.is_empty()); // only called internally so it seems fair to panic, it cannot be a user error
 
     let base_timestamp = records.iter().min_by_key(|record| record.timestamp).unwrap().timestamp;
     let batch = RecordBatch {

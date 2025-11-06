@@ -1,13 +1,10 @@
-use std::io::Cursor;
-use std::rc::Rc;
-use std::time::{Instant, SystemTime};
+use crate::Error::{Api, Ureq};
 use mockall::automock;
 use serde::{Deserialize, Serialize};
-use ureq;
-use ureq::config::Config;
+use std::io::Cursor;
+use std::time::Instant;
 use ureq::http::Response;
-use ureq::{Agent, Body, SendBody};
-use crate::Error::{Api, Ureq};
+use ureq::{self, Agent, Body, config::Config, SendBody};
 
 #[cfg(test)]
 #[path = "api_client_test.rs"]

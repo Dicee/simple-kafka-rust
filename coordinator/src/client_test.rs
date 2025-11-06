@@ -2,7 +2,6 @@ use crate::{Client, ClientImpl};
 use client_utils::{ApiClient, HttpClient, MockHttpClient};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use actix_web::HttpResponse;
 use assertor::{assert_that, ResultAssertion};
 use mockall::predicate::eq;
 use ureq::Body;

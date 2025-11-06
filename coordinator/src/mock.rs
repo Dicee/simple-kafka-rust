@@ -16,10 +16,10 @@ impl DummyClient {
 }
 
 impl crate::client::Client for DummyClient {
-    fn create_topic(&self, request: CreateTopicRequest) -> Result<()> { unimplemented!() }
-    fn get_topic(&self, request: GetTopicRequest) -> Result<GetTopicResponse> { unimplemented!() }
+    fn create_topic(&self, _: CreateTopicRequest) -> Result<()> { unimplemented!() }
+    fn get_topic(&self, _: GetTopicRequest) -> Result<GetTopicResponse> { unimplemented!() }
     fn list_brokers(&self) -> Result<ListBrokersResponse> { unimplemented!() }
-    fn register_broker(&self, request: RegisterBrokerRequest) -> Result<()> { unimplemented!() }
+    fn register_broker(&self, _: RegisterBrokerRequest) -> Result<()> { unimplemented!() }
 
     fn increment_write_offset(&self, request: IncrementWriteOffsetRequest) -> Result<()> {
         let mut write_offsets = self.write_offsets.lock().unwrap();

@@ -1,4 +1,3 @@
-use actix_web::http::header;
 use crate::model::*;
 use client_utils::ApiClient;
 use mockall::automock;
@@ -41,7 +40,7 @@ impl Client for ClientImpl {
     }
 
     fn poll_batches_raw(&self, topic: String, partition: u32, consumer_group: String, poll_config: PollConfig) -> Result<PollBatchesRawResponse> {
-        let response = self.api_client.post(&format!("{POLL_BATCHES_RAW}"), PollBatchesRequest { topic, partition, consumer_group, poll_config })?;
+        let response = self.api_client.post(POLL_BATCHES_RAW, PollBatchesRequest { topic, partition, consumer_group, poll_config })?;
         let ack_read_offset = match ApiClient::get_optional_header(READ_OFFSET_HEADER, &response)? {
             None => None,
             Some(header) => Some(header.parse().map_err(|e| Error::Api(format!("Failed to parse {READ_OFFSET_HEADER} to u64 due to {e:?}")))?)

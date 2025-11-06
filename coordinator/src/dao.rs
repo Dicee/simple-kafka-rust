@@ -1,11 +1,9 @@
 use std::fmt::Formatter;
-use rusqlite;
 use std::path::Path;
 use std::result;
 use rusqlite::Error::SqliteFailure;
 use rusqlite::ErrorCode::ConstraintViolation;
 use r2d2_sqlite::SqliteConnectionManager;
-use r2d2;
 use r2d2::{Pool, PooledConnection};
 use crate::dao::Error::*;
 

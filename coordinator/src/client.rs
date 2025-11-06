@@ -65,7 +65,7 @@ impl Client for ClientImpl {
     }
 
     fn get_write_offset(&self, request: GetWriteOffsetRequest) -> Result<GetWriteOffsetResponse> {
-        Ok(self.api_client.get(&format!("{TOPICS}/{}/{PARTITIONS}/{}/{WRITE_OFFSET}", request.topic, request.partition))?)
+        self.api_client.get(&format!("{TOPICS}/{}/{PARTITIONS}/{}/{WRITE_OFFSET}", request.topic, request.partition))
     }
 
     fn ack_read_offset(&self, request: AckReadOffsetRequest) -> Result<()> {
@@ -74,8 +74,8 @@ impl Client for ClientImpl {
     }
 
     fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse> {
-        Ok(self.api_client.get(&format!("{TOPICS}/{}/{PARTITIONS}/{}/{CONSUMER_GROUPS}/{}/{READ_OFFSET}",
-            request.topic, request.partition, request.consumer_group))?)
+        self.api_client.get(&format!("{TOPICS}/{}/{PARTITIONS}/{}/{CONSUMER_GROUPS}/{}/{READ_OFFSET}",
+            request.topic, request.partition, request.consumer_group))
     }
 
     fn register_broker(&self, request: RegisterBrokerRequest) -> Result<()> {
@@ -83,7 +83,5 @@ impl Client for ClientImpl {
         Ok(())
     }
 
-    fn list_brokers(&self) -> Result<ListBrokersResponse> {
-        Ok(self.api_client.get(BROKERS)?)
-    }
+    fn list_brokers(&self) -> Result<ListBrokersResponse> { self.api_client.get(BROKERS) }
 }

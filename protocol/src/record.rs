@@ -142,7 +142,7 @@ fn deserialize_batch(metadata: RecordBatchMetadata, compressed_record_bytes: &[u
         panic!("Expected exactly {payload_byte_size} bytes for compressed records but had {actual_record_byte_count}");
     }
 
-    let record_bytes = snappy_decompress(&compressed_record_bytes);
+    let record_bytes = snappy_decompress(compressed_record_bytes);
 
     let mut remaining_record_bytes: &[u8] = &record_bytes;
     let mut records = Vec::new();

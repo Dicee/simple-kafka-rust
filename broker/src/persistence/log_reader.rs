@@ -95,7 +95,7 @@ impl RotatingLogReader {
     /// or start exactly at EOF).
     pub fn read(&mut self, len: usize) -> io::Result<Vec<u8>> {
         self.rotate_if_needed_and_read(|r| r.log_reader.read_exact(len))
-            .map(|r| r.unwrap_or_else(|| vec![]))
+            .map(|r| r.unwrap_or_else(Vec::new))
     }
 
     /// Reads exactly 8 bytes from the current position and parses them as a [u64] value from its little endian representation. Returns [None]

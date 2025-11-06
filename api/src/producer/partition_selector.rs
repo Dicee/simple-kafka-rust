@@ -1,5 +1,4 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::rc::Rc;
 use std::sync::Arc;
 use linked_hash_map::LinkedHashMap;
 use coordinator::model::GetTopicRequest;
@@ -36,7 +35,7 @@ impl PartitionSelector {
 
         if partition_count == 0 { panic!("Topic {} has no partitions, which should be impossible", topic) };
 
-        Ok(self.hash_selector.try_select_partition(partition_count, &record)
+        Ok(self.hash_selector.try_select_partition(partition_count, record)
             .unwrap_or_else(|| self.round_robin_selector.select_partition(topic, partition_count)))
     }
 }

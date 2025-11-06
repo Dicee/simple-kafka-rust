@@ -11,19 +11,20 @@ use walkdir::WalkDir;
 #[path = "./indexing_test.rs"]
 mod indexing_test;
 
-///! This module takes care of the indexing logic (writing the index as well as using it for look-ups) of our log files, to allow fast search
-///! by record offset. We do not support time-based indexing at the moment. Note that in this module, ze zill never mention the term "offset",
-///! and instead talk about an "index". This is because this module will be used by [super::append_only_log] and [super::log_reader], which are
-///! not expected to understand business logic, and are purely persistence layer abstractions that can be reused in different contexts. For example
-///! if the implementation changes for some key business logic, we should still be able to reuse these building blocks largely unchanged. The
-///! other reason to decouple this module from the notion of offset is that we could use this same code for timestamps in the future, so having
-///! a single terminology for all indexing use cases is helpful. Note that it is a requirement that an index is unique for a record, and monotonically
+/// This module takes care of the indexing logic (writing the index as well as using it for look-ups) of our log files, to allow fast search
+/// by record offset. We do not support time-based indexing at the moment. Note that in this module, ze zill never mention the term "offset",
+/// and instead talk about an "index". This is because this module will be used by [super::append_only_log] and [super::log_reader], which are
+/// not expected to understand business logic, and are purely persistence layer abstractions that can be reused in different contexts. For example
+/// if the implementation changes for some key business logic, we should still be able to reuse these building blocks largely unchanged. The
+/// other reason to decouple this module from the notion of offset is that we could use this same code for timestamps in the future, so having
+/// a single terminology for all indexing use cases is helpful. Note that it is a requirement that an index is unique for a record, and monotonically
 /// increasing. Failing that, indexing will have undefined behaviour.
-
+///
 /// In real life this could be a configurable setting, or calculated from other settings. In our case, we made the following assumptions:
 /// - the max file size is 10MB (see [super::MAX_FILE_SIZE_BYTES])
 /// - a single record is about 1kB (so there are about 10,000 records in one file)
 /// - a record batch contains about 50 records (so there are about 200 batches in one file).
+///
 /// We want to have roughly logarithmic (in the number of records) access to a record, so roughly 10 disk seeks to find the base offset of the batch.
 /// To achieve that, we need to index every 20 batches, namely every 1000 records.
 pub(crate) const MAX_INDEX_GAP: u64 = 1000;
@@ -102,11 +103,10 @@ impl LogIndexWriter {
     }
 
     fn force_ack_bytes_written(&mut self, index: u64, byte_offset: u64) -> io::Result<()> {
-        Ok({
-            self.index_file.write_all(&index.to_le_bytes())?;
-            self.index_file.write_all(&byte_offset.to_le_bytes())?;
-            self.last_written_index = index;
-        })
+        self.index_file.write_all(&index.to_le_bytes())?;
+        self.index_file.write_all(&byte_offset.to_le_bytes())?;
+        self.last_written_index = index;
+        Ok(())
     }
 
     /// Flushes the content of the internal buffer to the disk. It is recommended to always flush after flushing the record writer's buffer,
@@ -144,7 +144,7 @@ pub struct IndexLookupResult {
 pub fn look_up(root_path: &Path, index: u64) -> io::Result<Option<IndexLookupResult>> {
     let mut index_files = Vec::new();
 
-    WalkDir::new(&root_path)
+    WalkDir::new(root_path)
         .sort_by_file_name()
         .into_iter()
         // not super elegant compared to using iterator methods, but it makes handling the many layers of Result nicely
@@ -193,7 +193,7 @@ pub(crate) fn parse_index_file(log_file_path: &Path) -> io::Result<Vec<(u64, u64
     let mut reader = BufReader::new(File::open(log_file_path)?);
     let mut buf = [0u8; 8];
 
-    while reader.fill_buf()?.len() > 0 {
+    while !reader.fill_buf()?.is_empty() {
         reader.read_exact(&mut buf)?;
         let index = u64::from_le_bytes(buf);
 
@@ -211,7 +211,7 @@ pub(crate) fn parse_index_file(log_file_path: &Path) -> io::Result<Vec<(u64, u64
 /// In this case, [None] is returned. If the next log file exists, its path is returned.
 pub fn get_next_log_file_path(log_file_path: &Path) -> io::Result<Option<PathBuf>> {
     let root_path = log_file_path.parent().unwrap_or(Path::new("")).to_owned();
-    Ok(match extract_last_index(&log_path_to_index_path(&log_file_path).1)? {
+    Ok(match extract_last_index(&log_path_to_index_path(log_file_path).1)? {
         None => None,
         Some(last_index) => {
             let next_log_file_path = root_path.join(super::get_log_name(last_index));
@@ -221,7 +221,7 @@ pub fn get_next_log_file_path(log_file_path: &Path) -> io::Result<Option<PathBuf
 }
 
 fn extract_last_index(index_file_path: &Path) -> io::Result<Option<u64>> {
-    if !fs::exists(&index_file_path)? { return Ok(None) }
+    if !fs::exists(index_file_path)? { return Ok(None) }
 
     let file_len = fs::metadata(index_file_path)?.len();
     if file_len == 0 { return Ok(None); }
@@ -251,8 +251,8 @@ fn validate_path_and_change_extension(log_path: &Path, new_extension: &str) -> (
     let index = log_file_name[0..(log_file_name.len() - extension_length - 1)]
         .to_owned()
         .parse::<u64>()
-        .expect(&format!("Log file names should be composed solely of a u64 index (first index in the log) and an \
-                optional extension but was: {}", &log_file_name));
+        .unwrap_or_else(|_| panic!("Log file names should be composed solely of a u64 index (first index in the log) and an optional \
+            extension but was: {}", &log_file_name));
 
     (index, log_path.with_extension(new_extension))
 }

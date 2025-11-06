@@ -79,7 +79,7 @@ impl LogManager {
     /// - [BrokerError::Internal] if the writer thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
     pub fn atomic_write(&self, topic: &str, partition: u32, atomic_write: impl AtomicWriteAction) -> Result<u64, BrokerError> {
-        self.get_or_create_partition_manager(topic, partition, |e| BrokerError::Io(e))?.atomic_write(atomic_write)
+        self.get_or_create_partition_manager(topic, partition, BrokerError::Io)?.atomic_write(atomic_write)
     }
 
     /// Atomically performs arbitrary read operations specified by the [AtomicReadAction] with the guarantee that no other threads will be able to interleave
@@ -89,12 +89,12 @@ impl LogManager {
     /// - [BrokerError::Internal] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
     pub fn atomic_read(&self, topic: &str, partition: u32, consumer_group: String, atomic_read: impl AtomicReadAction) -> Result<IndexedRecord, BrokerError> {
-        self.get_or_create_partition_manager(topic, partition, |e| BrokerError::Io(e))?.atomic_read(consumer_group, atomic_read)
+        self.get_or_create_partition_manager(topic, partition, BrokerError::Io)?.atomic_read(consumer_group, atomic_read)
     }
 
     /// Obtains a shared reference to the [WriteNotifier] for a given topic and partition. Note that this notifier is shared across all consumer groups.
     pub fn get_write_notifier(&self, topic: &str, partition: u32) -> Result<Arc<WriteNotifier>, BrokerError> {
-        Ok(self.get_or_create_partition_manager(topic, partition, |e| BrokerError::Io(e))?.write_notifier())
+        Ok(self.get_or_create_partition_manager(topic, partition, BrokerError::Io)?.write_notifier())
     }
 
     fn get_or_create_partition_manager<F, Err>(&self, topic: &str, partition: u32, map_error: F) -> Result<Arc<PartitionLogManager>, Err>
@@ -125,8 +125,8 @@ impl LogManager {
 
         println!("Shutting down log manager... Waiting for {} partition log managers to shut down", log_files.len());
 
-        log_files.into_iter()
-            .map(|(_, partition_manager)|
+        log_files.into_values()
+            .map(|partition_manager|
                 Arc::into_inner(partition_manager)
                     .expect("LogManager::shutdown called, but other Arc clones of this PartitionLogManager still exist.")
                     .shutdown()
@@ -240,8 +240,8 @@ impl PartitionLogManager {
         println!("Shutting down partition under root path {}... Waiting for {} reader(s) and 1 writer to shut down.",
                  self.root_path, consumers.len());
 
-        consumers.into_iter()
-            .map(|(_, consumer_manager)| consumer_manager.reader_thread.join())
+        consumers.into_values()
+            .map(|consumer_manager| consumer_manager.reader_thread.join())
             .chain(iter::once(self.writer_thread.join()))
             .fold(Ok(()), |acc, result| if result.is_err() { result } else { acc })
     }
@@ -382,10 +382,8 @@ fn start_mpsc_request_loop<Req, Res, Err, F>(
         };
 
         let result = do_process(&request);
-        match request.response_tx().send(result) {
-            Err(_) => eprintln!("{description} - Failed sending a response to the requester. This may be a temporary or \
-                isolated issue, so the loop will stay alive."),
-            _ => {},
+        if request.response_tx().send(result).is_err() {
+            eprintln!("{description} - Failed sending a response to the requester. This may be a temporary or isolated issue, so the loop will stay alive.");
         }
     }
 }
