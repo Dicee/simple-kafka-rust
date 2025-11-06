@@ -1,9 +1,11 @@
+use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use protocol::record::RecordBatch;
 
 // POST operations
 pub const PUBLISH: &str = "/publish";
 pub const PUBLISH_RAW: &str = "/publish-raw";
+pub const POLL_BATCHES_RAW: &str = "/poll-batches-raw";
 pub const READ_NEXT_BATCH: &str = "/read-next-batch";
 pub const READ_NEXT_BATCH_RAW: &str = "/read-next-batch-raw";
 
@@ -62,4 +64,20 @@ pub struct RecordBatchWithOffset {
 pub struct RawRecordBatchWithOffset {
     pub base_offset: u64,
     pub bytes: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Debug)]
+pub struct PollBatchesRequest {
+    pub topic: String,
+    pub partition: u32,
+    pub consumer_group: String,
+    pub poll_config: PollConfig,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Debug)]
+pub struct PollConfig {
+    pub max_wait: Duration,
+    pub max_batches: usize,
 }

@@ -10,6 +10,8 @@
 - return fine-grained, strongly typed deserializable errors from my HTTP clients for API 4xx
 - add proper logging
 - add back-pressure in `BatchPublisher` to avoid being overwhelmed if publishing to the brokers is much slower than the producer is at sending records
+- replace SQLite in the coordinator with a Valkey Docker container with regular backups on a volume
+- make errors more traceable, so that it's easier to know exactly where they were thrown from
 
 ## Optimizations
 
@@ -26,7 +28,7 @@
 
 ## Bugs
 
-- we might need to use `read` rather than `read_exact` to implement `read_u64_le` because if we're unlucky the write buffer might be flush while writing the offset,
+- we might need to use `read` rather than `read_exact` to implement `read_u64_le` because if we're unlucky the write buffer might be flushed while writing the offset,
   before all bytes of the offset have been written, and the reader might see this data and fail to read a `u64`.
 
 # Done

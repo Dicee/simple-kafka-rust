@@ -12,6 +12,7 @@ use protocol::record::RecordBatch;
 pub trait Client : Send + Sync {
     fn publish(&self, topic: &str, partition: u32, record_batch: RecordBatch) -> Result<PublishResponse>;
     fn publish_raw(&self, topic: &str, partition: u32, bytes: Vec<u8>, record_count: u32) -> Result<PublishResponse>;
+    fn poll_batches_raw(&self, topic: String, partition: u32, consumer_group: String, poll_config: PollConfig) -> Result<Vec<u8>>;
     fn read_next_batch(&self, topic: String, partition: u32, consumer_group: String) -> Result<RecordBatchWithOffset>;
     fn read_next_batch_raw(&self, topic: String, partition: u32, consumer_group: String) -> Result<RawRecordBatchWithOffset>;
 }
@@ -39,6 +40,11 @@ impl Client for ClientImpl {
             {PARTITION}={partition}&\
             {RECORD_COUNT}={record_count}"
         ), bytes)
+    }
+
+    fn poll_batches_raw(&self, topic: String, partition: u32, consumer_group: String, poll_config: PollConfig) -> Result<Vec<u8>> {
+        let response = self.api_client.post(&format!("{POLL_BATCHES_RAW}"), PollBatchesRequest { topic, partition, consumer_group, poll_config })?;
+        Ok(response.into_body().read_to_vec()?)
     }
 
     fn read_next_batch(&self, topic: String, partition: u32, consumer_group: String) -> Result<RecordBatchWithOffset> {

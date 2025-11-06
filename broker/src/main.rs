@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::broker::Broker;
 use crate::persistence::{IndexedRecord, LogManager};
 use argh::FromArgs;
-use ::broker::model::{PublishRawRequest, PublishResponse, ReadNextBatchRequest, TopicPartition, BASE_OFFSET_HEADER};
+use ::broker::model::{PollBatchesRequest, PublishRawRequest, PublishResponse, ReadNextBatchRequest, TopicPartition, BASE_OFFSET_HEADER};
 use broker::Error as BrokerError;
 use coordinator::model::RegisterBrokerRequest;
 use protocol::record::RecordBatch;
@@ -64,7 +64,31 @@ async fn publish_raw(
 }
 
 // Note this is a post because it modifies some state on the server. Ideally the client should just send an offset to read from, but for now we
-// do not have an operation capable of reinitializing the state of the reader on the broker side if we notice that the request offset is not the 
+// do not have an operation capable of reinitializing the state of the reader on the broker side if we notice that the request offset is not the
+// one the reader is currently tracking. For simplicity's sake, we'll keep the stateful API for now (I want to get things to work end-to-end before
+// working on smaller improvements).
+#[post("/poll-batches-raw")]
+async fn poll_batches_raw(
+    broker: web::Data<Arc<Broker>>,
+    request: web::Json<PollBatchesRequest>,
+) -> impl Responder {
+    let PollBatchesRequest { topic, partition, consumer_group, poll_config } = request.into_inner();
+    match web::block(move || { broker.poll_batches_raw(&topic, partition, consumer_group, &poll_config) }).await {
+        Ok(Ok(batches)) => {
+            let mut bytes = Vec::new();
+            for batch in batches {
+                bytes.extend(batch.0.to_le_bytes());
+                bytes.extend(batch.1);
+            }
+            HttpResponse::Ok().body(bytes)
+        },
+        Ok(Err(e)) => convert_broker_error(e),
+        Err(_) => new_internal_failure_response(),
+    }
+}
+
+// Note this is a post because it modifies some state on the server. Ideally the client should just send an offset to read from, but for now we
+// do not have an operation capable of reinitializing the state of the reader on the broker side if we notice that the request offset is not the
 // one the reader is currently tracking. For simplicity's sake, we'll keep the stateful API for now (I want to get things to work end-to-end before
 // working on smaller improvements).
 #[post("/read-next-batch")]
@@ -134,6 +158,7 @@ async fn main() -> std::io::Result<()> {
         .app_data(broker_data.clone())
         .service(ping)
         .service(publish).service(publish_raw)
+        .service(poll_batches_raw)
         .service(read_next_batch).service(read_next_batch_raw)
     );
 

@@ -1,13 +1,3 @@
-mod append_only_log;
-mod log_reader;
-pub mod indexing;
-
-#[cfg(test)]
-mod persistence_test;
-
-pub use log_reader::RotatingLogReader;
-pub use append_only_log::RotatingAppendOnlyLog;
-
 use crate::broker::Error as BrokerError;
 use mockall::automock;
 use std::collections::hash_map::Entry;
@@ -16,11 +6,21 @@ use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
-use std::sync::{atomic, Arc, Mutex};
+use std::sync::{atomic, Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use std::{io, iter, thread};
 use tokio::sync::oneshot;
+
+pub use append_only_log::RotatingAppendOnlyLog;
+pub use log_reader::RotatingLogReader;
+
+mod append_only_log;
+mod log_reader;
+pub mod indexing;
+
+#[cfg(test)]
+mod persistence_test;
 
 const LOG_EXTENSION: &str = "log";
 const INDEX_EXTENSION: &str = "index";
@@ -92,6 +92,11 @@ impl LogManager {
         self.get_or_create_partition_manager(topic, partition, |e| BrokerError::Io(e))?.atomic_read(consumer_group, atomic_read)
     }
 
+    /// Obtains a shared reference to the [WriteNotifier] for a given topic and partition. Note that this notifier is shared across all consumer groups.
+    pub fn get_write_notifier(&self, topic: &str, partition: u32) -> Result<Arc<WriteNotifier>, BrokerError> {
+        Ok(self.get_or_create_partition_manager(topic, partition, |e| BrokerError::Io(e))?.write_notifier())
+    }
+
     fn get_or_create_partition_manager<F, Err>(&self, topic: &str, partition: u32, map_error: F) -> Result<Arc<PartitionLogManager>, Err>
     where F: Fn(io::Error) -> Err
     {
@@ -140,6 +145,7 @@ struct PartitionLogManager {
     root_path: String,
     writer_tx: Sender<WriteRequest>,
     writer_thread: JoinHandle<()>,
+    write_notifier: Arc<WriteNotifier>,
     consumers: Mutex<HashMap<String, ConsumerManager>>,
     loop_timeout: Duration,
     shutdown: Arc<AtomicBool>,
@@ -170,6 +176,7 @@ impl PartitionLogManager {
             root_path: partition_root_path,
             writer_tx,
             writer_thread,
+            write_notifier: Arc::new(WriteNotifier::new()),
             shutdown,
             loop_timeout,
             consumers: Mutex::new(HashMap::new()),
@@ -188,7 +195,10 @@ impl PartitionLogManager {
         let send_result = self.writer_tx.send(WriteRequest { atomic_write: Box::new(atomic_write), response_tx });
         if send_result.is_err() { return Err(new_worker_thread_disconnected_error()) }
 
-        response_rx.blocking_recv().unwrap_or_else(|_| Err(new_worker_thread_disconnected_error()))
+        let offset = response_rx.blocking_recv().unwrap_or_else(|_| Err(new_worker_thread_disconnected_error()))?;
+        self.write_notifier.notify_readers();
+
+        Ok(offset)
     }
 
     /// Atomically performs arbitrary read operations specified by the [AtomicReadAction] with the guarantee that no other threads will be able to interleave
@@ -234,6 +244,35 @@ impl PartitionLogManager {
             .map(|(_, consumer_manager)| consumer_manager.reader_thread.join())
             .chain(iter::once(self.writer_thread.join()))
             .fold(Ok(()), |acc, result| if result.is_err() { result } else { acc })
+    }
+
+    fn write_notifier(&self) -> Arc<WriteNotifier> { Arc::clone(&self.write_notifier) }
+}
+
+/// This struct allows readers to be notified whenever a new write has occurred in the same topic/partition. This is helpful to implement
+/// long polling efficiently.
+pub struct WriteNotifier {
+    cvar: Condvar,
+    dummy_lock: Mutex<()>, // I need the Condvar only for waiting and notifying, there's no shared state behind it
+}
+
+impl WriteNotifier {
+    fn new() -> Self {
+        Self {
+            cvar: Condvar::new(),
+            dummy_lock: Mutex::new(()),
+        }
+    }
+
+    /// Wakes up all threads that are currently waiting for new data to be written. Private as only the persistence layer is the one that knows when
+    /// a write happened.
+    fn notify_readers(&self) {
+        self.cvar.notify_one(); // notify ALL because there might be multiple consumer groups waiting for new data to be written
+    }
+
+    /// Waits for a new write to happen on the partition associated to this [WriteNotifier], with the provided timeout.
+    pub fn wait_new_write(&self, timeout: Duration) {
+        let _ = self.cvar.wait_timeout(self.dummy_lock.lock().unwrap(), timeout).unwrap();
     }
 }
 
@@ -299,7 +338,7 @@ pub trait AtomicReadAction : Send + 'static {
     fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, BrokerError>;
 }
 
-#[derive(Debug)]
+#[derive(Eq, PartialEq, Debug)]
 pub struct IndexedRecord(pub u64, pub Vec<u8>);
 
 /// Handles the resources and logic to continuously read from a rotating log file for a single partition.

@@ -1,15 +1,21 @@
 use crate::broker::Error::Coordinator;
 use crate::broker::{Broker, Error, RecordBatchWithOffset};
-use crate::persistence::{indexing, AtomicWriteAction, LogManager, RotatingAppendOnlyLog};
+use crate::persistence::{indexing, AtomicWriteAction, IndexedRecord, LogManager, RotatingAppendOnlyLog};
 use assertor::{assert_that, EqualityAssertion, OptionAssertion, ResultAssertion};
 use coordinator::model::*;
 use file_test_utils::TempTestDir;
-use protocol::record::{serialize_batch_into, Header, Record, RecordBatch};
+use protocol::record::{serialize_batch, serialize_batch_into, Header, Record, RecordBatch};
 use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
+use ntest_timeout::timeout;
+use broker::model::PollConfig;
 
 const TOPIC: &str = "chess-news";
 const PARTITION: u32 = 116;
 const CONSUMER_GROUP: &str = "danya-fans";
+
+static POLL_CONFIG: PollConfig = PollConfig { max_batches: 3, max_wait: Duration::from_millis(100) };
 
 #[test]
 fn test_serialization_round_trip_from_first_offset() {
@@ -297,6 +303,109 @@ fn test_read_next_batch_while_a_batch_is_being_written() {
         .has_ok(None);
 
     broker.shutdown().unwrap();
+}
+
+#[test]
+#[timeout(150)]
+fn test_poll_batches_no_records() {
+    let temp_dir = TempTestDir::create();
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
+    let broker = new_broker(&temp_dir, &coordinator_client);
+
+    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG)).has_ok(vec![]);
+}
+
+#[test]
+#[timeout(150)]
+fn test_poll_batches_waits_to_find_enough_batches() {
+    let temp_dir = TempTestDir::create();
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
+    let broker = Arc::new(new_broker(&temp_dir, &coordinator_client));
+    let broker_clone = Arc::clone(&broker);
+
+    let batch_1 = new_record_batch(0, vec![new_record(0, 0)]);
+    let batch_2 = new_record_batch(1, vec![new_record(1, 0), new_record(1, 1)]);
+    let batch_3 = new_record_batch(2, vec![new_record(2, 1)]);
+
+    let batch_1_clone = batch_1.clone();
+    let batch_2_clone = batch_2.clone();
+    let batch_3_clone = batch_3.clone();
+
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        broker_clone.publish(TOPIC, PARTITION, batch_1).unwrap();
+
+        thread::sleep(Duration::from_millis(50));
+        broker_clone.publish(TOPIC, PARTITION, batch_2).unwrap();
+
+        thread::sleep(Duration::from_millis(10));
+        broker_clone.publish(TOPIC, PARTITION, batch_3).unwrap();
+    });
+
+    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG)).has_ok(vec![
+            IndexedRecord(0, serialize_batch(batch_1_clone)),
+            IndexedRecord(1, serialize_batch(batch_2_clone)),
+            IndexedRecord(3, serialize_batch(batch_3_clone)),
+    ]);
+}
+
+#[test]
+#[timeout(25)]
+fn test_poll_batches_returns_immediately_if_enough_batches_present() {
+    let temp_dir = TempTestDir::create();
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
+    let broker = Arc::new(new_broker(&temp_dir, &coordinator_client));
+    let broker_clone = Arc::clone(&broker);
+
+    let batch_1 = new_record_batch(0, vec![new_record(0, 0)]);
+    let batch_2 = new_record_batch(1, vec![new_record(1, 0), new_record(1, 1)]);
+    let batch_3 = new_record_batch(2, vec![new_record(2, 1)]);
+
+    broker_clone.publish(TOPIC, PARTITION, batch_1.clone()).unwrap();
+    broker_clone.publish(TOPIC, PARTITION, batch_2.clone()).unwrap();
+    broker_clone.publish(TOPIC, PARTITION, batch_3.clone()).unwrap();
+
+    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG)).has_ok(vec![
+        IndexedRecord(0, serialize_batch(batch_1)),
+        IndexedRecord(1, serialize_batch(batch_2)),
+        IndexedRecord(3, serialize_batch(batch_3)),
+    ]);
+}
+
+#[test]
+#[timeout(225)]
+fn test_poll_batches_returns_fewer_batches_if_timeout_exceeded() {
+    let temp_dir = TempTestDir::create();
+    let coordinator_client: Arc<dyn coordinator::Client> = Arc::new(coordinator::DummyClient::new());
+    let broker = Arc::new(new_broker(&temp_dir, &coordinator_client));
+    let broker_clone = Arc::clone(&broker);
+
+    let batch_1 = new_record_batch(0, vec![new_record(0, 0)]);
+    let batch_2 = new_record_batch(1, vec![new_record(1, 0), new_record(1, 1)]);
+    let batch_3 = new_record_batch(2, vec![new_record(2, 1)]);
+
+    let batch_1_clone = batch_1.clone();
+    let batch_2_clone = batch_2.clone();
+    let batch_3_clone = batch_3.clone();
+
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        broker_clone.publish(TOPIC, PARTITION, batch_1).unwrap();
+
+        thread::sleep(Duration::from_millis(50));
+        broker_clone.publish(TOPIC, PARTITION, batch_2).unwrap();
+
+        thread::sleep(Duration::from_millis(60));
+        broker_clone.publish(TOPIC, PARTITION, batch_3).unwrap();
+    });
+
+    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG)).has_ok(vec![
+        IndexedRecord(0, serialize_batch(batch_1_clone)),
+        IndexedRecord(1, serialize_batch(batch_2_clone))
+    ]);
+
+    assert_that!(broker.poll_batches_raw(TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), &POLL_CONFIG))
+        .has_ok(vec![IndexedRecord(3, serialize_batch(batch_3_clone))]);
 }
 
 fn ack_read_offset(coordinator_client: Arc<dyn coordinator::Client>, offset: u64) {
