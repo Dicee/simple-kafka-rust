@@ -5,7 +5,7 @@ pub mod consumer;
 
 pub mod common;
 
+mod semaphore;
+
 #[cfg(test)]
 mod mock_utils;
-
-mod semaphore;

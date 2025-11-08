@@ -1,11 +1,12 @@
 use crate::mock_utils::{eq_serialized_batch, expect_list_brokers, expect_publish_raw, set_up_broker_resolver};
 use crate::producer::batch_publisher::BatchPublisher;
-use broker::model::TopicPartition;
+use broker::model::{BrokerApiErrorKind, TopicPartition};
 use mockall::predicate;
 use predicate::eq;
 use protocol::record::{Record, RecordBatch};
 use std::sync::Arc;
 use std::vec;
+use client_utils::ApiError;
 
 const TOPIC1: &'static str = "topic1";
 const TOPIC2: &'static str = "topic2";
@@ -51,11 +52,10 @@ fn test_publish_async_publish_loop_survives_single_broker_failure() {
         .expect_publish_raw()
         .with(eq(TOPIC1.to_owned()), eq(P1), eq_serialized_batch(batch1.clone()), eq(1))
         .times(1)
-        .returning(|_, _, _, _| Err(broker::Error::Api(String::from("Ain't my fault"))));
+        .returning(|_, _, _, _| Err(broker::Error::Api(ApiError { kind: BrokerApiErrorKind::Internal, message: String::from("Ain't my fault") })));
     
     expect_publish_raw(&mut broker_mock, TOPIC2, P2, batch2.clone());
-
-
+    
     let coordinator: Arc<dyn coordinator::Client> = Arc::new(coordinator);
     let broker: Arc<dyn broker::Client> = Arc::new(broker_mock);
 

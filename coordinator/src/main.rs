@@ -118,11 +118,20 @@ async fn list_brokers(
 }
 
 fn convert_dao_error(e: Error) -> HttpResponse {
-    match e {
-        // I prefer explicitly listing all 4xx rather than using _ so that we can visually confirm that indeed, all of them are 4xx
-        TopicAlreadyExists(_) | TopicNotFound(_) | OutOfRangePartition { .. } | InvalidReadOffset(_) => HttpResponse::BadRequest().body(e.to_string()),
-        Internal(msg) => HttpResponse::InternalServerError().body(msg),
-    }
+    let mut builder = 
+        if let Internal(_) = e { HttpResponse::InternalServerError() } 
+        else { HttpResponse::BadRequest() };
+    
+    // This looks stupid, I know, but I want to decouple internal error types from the public-facing type. Right now it's 1:1 but may not always be.
+    let kind = match &e {
+        TopicAlreadyExists(_) => CoordinatorApiErrorKind::TopicAlreadyExists,
+        TopicNotFound(_) => CoordinatorApiErrorKind::TopicNotFound,
+        OutOfRangePartition { .. } => CoordinatorApiErrorKind::OutOfRangePartition,
+        InvalidReadOffset(_) => CoordinatorApiErrorKind::InvalidReadOffset,
+        Internal(_) => CoordinatorApiErrorKind::Internal,
+    };
+    
+    builder.json(CoordinatorApiError { kind, message: e.to_string() })
 }
 
 #[actix_web::main]

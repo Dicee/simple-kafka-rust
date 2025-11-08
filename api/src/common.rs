@@ -1,3 +1,6 @@
+use broker::model::BrokerApiErrorKind;
+use client_utils::ApiError;
+use coordinator::model::CoordinatorApiErrorKind;
 use std::time::Duration;
 
 pub mod broker_resolver;
@@ -11,8 +14,8 @@ pub struct Config {
 
 #[derive(Debug)]
 pub enum Error {
-    CoordinatorApi(String),
-    BrokerApi(String),
+    CoordinatorApi(ApiError<CoordinatorApiErrorKind>),
+    BrokerApi(ApiError<BrokerApiErrorKind>),
     Ureq(ureq::Error),
 }
 
@@ -22,6 +25,10 @@ pub fn map_coordinator_error(e: coordinator::Error) -> Error {
     match e {
         coordinator::Error::Ureq(e) => Error::Ureq(e),
         coordinator::Error::Api(e) => Error::CoordinatorApi(e),
+        coordinator::Error::InvalidResponse(message) => Error::CoordinatorApi(ApiError {
+            kind: CoordinatorApiErrorKind::Internal,
+            message,
+        })
     }
 }
 
@@ -29,5 +36,9 @@ pub fn map_broker_error(e: broker::Error) -> Error {
     match e {
         broker::Error::Ureq(e) => Error::Ureq(e),
         broker::Error::Api(e) => Error::BrokerApi(e),
+        broker::Error::InvalidResponse(message) => Error::BrokerApi(ApiError {
+            kind: BrokerApiErrorKind::Internal,
+            message,
+        })
     }
 }

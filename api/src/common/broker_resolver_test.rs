@@ -1,11 +1,13 @@
 use crate::common::broker_resolver::{BrokerClientFactory, BrokerResolver};
 use assertor::{assert_that, EqualityAssertion, IteratorAssertion};
 use broker::model::{PollBatchesRawResponse, PollConfig, PublishResponse};
-use coordinator::model::{HostAndPort, ListBrokersResponse};
+use coordinator::model::{CoordinatorApiErrorKind, HostAndPort, ListBrokersResponse};
 use protocol::record::RecordBatch;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use client_utils::ApiError;
+use coordinator::model::CoordinatorApiErrorKind::Internal;
 
 #[test]
 #[should_panic(expected = "No brokers are registered to the coordinator")]
@@ -24,11 +26,14 @@ fn test_new_coordinator_failure() {
     let mut coordinator = coordinator::MockClient::new();
     coordinator.expect_list_brokers()
         .times(1)
-        .returning(move || Err(coordinator::Error::Api("Oh no!".to_owned())));
+        .returning(move || Err(coordinator::Error::Api(ApiError { kind: Internal, message: "Oh no!".to_owned() })));
 
     let factory = DummyBrokerClientFactory::new();
     match BrokerResolver::new_with_factory(Arc::new(coordinator), &factory) {
-        Err(crate::common::Error::CoordinatorApi(msg)) => assert_that!(msg).is_equal_to("Oh no!".to_owned()),
+        Err(crate::common::Error::CoordinatorApi(ApiError {
+            kind: CoordinatorApiErrorKind::Internal,
+            message
+        })) => assert_that!(message).is_equal_to("Oh no!".to_owned()),
         _ => unreachable!(),
     }
 }

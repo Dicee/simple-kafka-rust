@@ -4,9 +4,8 @@ use mockall::automock;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-// re-exporting gives a nicer feeling of homogeneity to the users, and also gives us the freedom to change the definition of the result type transparently
-pub use client_utils::Result as Result;
-pub use client_utils::Error as Error;
+pub type Error = client_utils::Error<CoordinatorApiErrorKind>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 #[path = "./client_test.rs"]
@@ -25,7 +24,7 @@ pub trait Client : Send + Sync {
 }
 
 pub struct ClientImpl {
-    api_client: ApiClient,
+    api_client: ApiClient<CoordinatorApiErrorKind>,
     topics: Mutex<HashMap<String, GetTopicResponse>>,
 }
 

@@ -2,7 +2,8 @@ use crate::consumer::{ConsumerRecord, ConsumerRecordIter};
 use crate::mock_utils::{expect_list_brokers, set_up_broker_resolver};
 use crate::{common, consumer};
 use assertor::{assert_that, EqualityAssertion, OptionAssertion};
-use broker::model::{PollBatchesRawResponse, PollConfig};
+use broker::model::{BrokerApiErrorKind, PollBatchesRawResponse, PollConfig};
+use client_utils::ApiError;
 use coordinator::model::{GetTopicRequest, GetTopicResponse};
 use predicates::ord::eq;
 use protocol::record::{serialize_batch_into, Record, RecordBatch};
@@ -106,7 +107,7 @@ fn test_subscribe_single_topic_broker_fails_then_succeeds() {
     broker.expect_poll_batches_raw()
         .with(eq(TOPIC1.to_owned()), eq(0), eq(CONSUMER_GROUP.to_owned()), eq(POLL_CONFIG))
         .returning_st(move |_, _, _, _| match call_index.fetch_add(1, Ordering::Relaxed) {
-            0 => Err(broker::Error::Api(error_msg.to_owned())),
+            0 => Err(broker::Error::Api(ApiError { kind: BrokerApiErrorKind::Internal, message: error_msg.to_owned() })),
             _ => Ok(new_poll_response(to_bytes(0, vec![new_batch(vec![new_record("hello"), new_record("world")])]))),
         });
 
@@ -116,7 +117,10 @@ fn test_subscribe_single_topic_broker_fails_then_succeeds() {
 
     let mut iter = consumer.subscribe(CONSUMER_GROUP.to_owned(), vec![TOPIC1.to_owned()]).unwrap();
     match iter.next() {
-        Some(Err(common::Error::BrokerApi(msg))) => assert_that!(msg).is_equal_to(error_msg.to_owned()),
+        Some(Err(common::Error::BrokerApi(ApiError {
+            kind: BrokerApiErrorKind::Internal,
+            message
+        }))) => assert_that!(message).is_equal_to(error_msg.to_owned()),
         _ => unreachable!(),
     };
     assert_that_next_is(&mut iter, TOPIC1, partition, 0, "hello");

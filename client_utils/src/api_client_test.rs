@@ -1,5 +1,5 @@
-use super::{ApiClient, MockHttpClient};
-use crate::Error::{Api, Ureq};
+use super::{ApiClient, ApiError, MockHttpClient};
+use crate::Error::{Api, InvalidResponse, Ureq};
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
 use mockall::predicate;
 use serde::{Deserialize, Serialize};
@@ -49,7 +49,7 @@ fn test_client_post_success_use_tls() {
             .unwrap()
         ));
 
-    let client = ApiClient::new_with_http_client(DOMAIN.to_string(), DEBUG, true, Box::new(http_client_mock));
+    let client = ApiClient::<DummyApiErrorKind>::new_with_http_client(DOMAIN.to_string(), DEBUG, true, Box::new(http_client_mock));
     assert_that!(client.post(API, DUMMY_REQUEST)).is_ok();
 }
 
@@ -64,15 +64,18 @@ fn test_client_post_api_error() {
         // to get the contents requires ownership
         .with(predicate::eq(URI), predicate::always())
         .times(1)
-        .returning(move |_, _| Ok(Response::builder()
-            .status(400)
-            .body(Body::builder().data(api_error_msg))
-            .unwrap()
-        ));
+        .returning(move |_, _| {
+            let error = ApiError { kind: DummyApiErrorKind::OnlyKind, message: api_error_msg.to_owned() };
+            Ok(Response::builder()
+                .status(400)
+                .body(Body::builder().data(serde_json::to_string(&error).unwrap()))
+                .unwrap()
+            )
+        });
 
     let client = new_client(http_client_mock);
     match client.post(API, DUMMY_REQUEST).unwrap_err() {
-        Api(msg) => assert_that!(msg).is_equal_to(api_error_msg.to_string()),
+        Api(ApiError { kind: DummyApiErrorKind::OnlyKind, message }) => assert_that!(message).is_equal_to(api_error_msg.to_string()),
         _ => unreachable!(),
     }
 }
@@ -142,7 +145,7 @@ fn test_get_optional_header_missing() {
         .body(Body::builder().data(String::new()))
         .unwrap();
 
-    assert_that!(ApiClient::get_optional_header("some_header", &response)).has_ok(None);
+    assert_that!(ApiClient::<DummyApiErrorKind>::get_optional_header("some_header", &response)).has_ok(None);
 }
 
 #[test]
@@ -152,7 +155,7 @@ fn test_get_optional_header_present_number() {
         .body(Body::builder().data(String::new()))
         .unwrap();
 
-    assert_that!(ApiClient::get_optional_header("some_header", &response)).has_ok(Some("25"));
+    assert_that!(ApiClient::<DummyApiErrorKind>::get_optional_header("some_header", &response)).has_ok(Some("25"));
 }
 
 #[test]
@@ -163,7 +166,7 @@ fn test_get_optional_header_present_string() {
         .body(Body::builder().data(String::new()))
         .unwrap();
 
-    assert_that!(ApiClient::get_optional_header("some_header", &response)).has_ok(Some(value));
+    assert_that!(ApiClient::<DummyApiErrorKind>::get_optional_header("some_header", &response)).has_ok(Some(value));
 }
 
 #[test]
@@ -172,8 +175,8 @@ fn test_get_required_header_missing() {
         .body(Body::builder().data(String::new()))
         .unwrap();
 
-    match ApiClient::get_required_header("some_header", &response) {
-        Err(Api(msg)) => assert_that!(msg).is_equal_to("Missing some_header header".to_owned()),
+    match ApiClient::<DummyApiErrorKind>::get_required_header("some_header", &response) {
+        Err(InvalidResponse(msg)) => assert_that!(msg).is_equal_to("Missing some_header header".to_owned()),
         _ => unreachable!(),
     }
 }
@@ -185,7 +188,7 @@ fn test_get_required_header_present_number() {
         .body(Body::builder().data(String::new()))
         .unwrap();
 
-    assert_that!(ApiClient::get_required_header("some_header", &response)).has_ok("25");
+    assert_that!(ApiClient::<DummyApiErrorKind>::get_required_header("some_header", &response)).has_ok("25");
 }
 
 #[test]
@@ -196,11 +199,16 @@ fn test_get_required_header_present_string() {
         .body(Body::builder().data(String::new()))
         .unwrap();
 
-    assert_that!(ApiClient::get_required_header("some_header", &response)).has_ok(value);
+    assert_that!(ApiClient::<DummyApiErrorKind>::get_required_header("some_header", &response)).has_ok(value);
 }
 
-fn new_client(http_client_mock: MockHttpClient) -> ApiClient {
+fn new_client(http_client_mock: MockHttpClient) -> ApiClient<DummyApiErrorKind> {
     ApiClient::new_with_http_client(DOMAIN.to_string(), DEBUG, USE_TLS, Box::new(http_client_mock))
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+enum DummyApiErrorKind {
+    OnlyKind
 }
 
 #[derive(Serialize)]

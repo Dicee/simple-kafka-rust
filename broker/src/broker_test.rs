@@ -1,17 +1,18 @@
-use std::io::Cursor;
-use crate::broker::Error::Coordinator;
 use crate::broker::{Broker, Error};
 use crate::persistence::{indexing, AtomicWriteAction, IndexedRecord, LogManager, RotatingAppendOnlyLog};
 use assertor::{assert_that, EqualityAssertion, OptionAssertion, ResultAssertion};
 use broker::model::{PollBatchesRawResponse, PollConfig, RecordBatchWithOffset};
+use client_utils::ApiError;
+use coordinator::model::CoordinatorApiErrorKind::Internal;
 use coordinator::model::*;
+use coordinator::Client as CoordinatorClient;
 use file_test_utils::TempTestDir;
 use ntest_timeout::timeout;
 use protocol::record::{serialize_batch, serialize_batch_into, Header, Record, RecordBatch};
+use std::io::Cursor;
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration};
-use coordinator::Client as CoordinatorClient;
+use std::time::Duration;
 
 const TOPIC: &str = "chess-news";
 const PARTITION: u32 = 116;
@@ -79,7 +80,7 @@ fn test_publish_write_offset_not_committed_if_failure_coordinator_failure() {
 
     let mut coordinator_client = coordinator::MockClient::new();
     coordinator_client.expect_get_write_offset()
-        .returning(|_| Err(coordinator::Error::Api(String::from("Oopsy"))));
+        .returning(|_| Err(coordinator::Error::Api(ApiError { kind: Internal, message : String::from("Oopsy") })));
 
     coordinator_client.expect_increment_write_offset().never();
 
@@ -89,7 +90,10 @@ fn test_publish_write_offset_not_committed_if_failure_coordinator_failure() {
     let base_timestamp = 15;
     let batch = new_record_batch(base_timestamp, vec![new_record(base_timestamp, 1)]);
     match broker.publish(TOPIC, PARTITION, batch) {
-        Err(Coordinator(msg)) => assert_that!(msg).is_equal_to(String::from("Api(\"Oopsy\")")),
+        Err(Error::CoordinatorApi(ApiError {
+            kind: CoordinatorApiErrorKind::Internal,
+            message
+        })) => assert_that!(message).is_equal_to(String::from("Oopsy")),
         _ => unreachable!(),
     }
 }

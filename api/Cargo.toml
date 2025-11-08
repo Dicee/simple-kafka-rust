@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 broker = { path = "../broker" }
+client_utils = { path = "../client_utils" }
 coordinator = { path = "../coordinator" }
 linked-hash-map = "0.5.6"
 mockall.workspace = true

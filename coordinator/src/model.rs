@@ -14,6 +14,17 @@ pub const WRITE_OFFSET: &str = "write-offset";
 pub const READ_OFFSET: &str = "read-offset";
 pub const BROKERS: &str = "/brokers";
 
+/// Public-facing errors for the coordinator service
+pub type CoordinatorApiError = client_utils::ApiError<CoordinatorApiErrorKind>;
+#[derive(Serialize, Deserialize, Debug)]
+pub enum CoordinatorApiErrorKind {
+    TopicAlreadyExists,
+    TopicNotFound,
+    OutOfRangePartition,
+    InvalidReadOffset,
+    Internal,
+}
+
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct CreateTopicRequest {

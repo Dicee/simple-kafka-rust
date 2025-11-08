@@ -227,6 +227,7 @@ version = "0.1.0"
 dependencies = [
  "assertor",
  "broker",
+ "client_utils",
  "coordinator",
  "linked-hash-map",
  "mockall",

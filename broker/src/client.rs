@@ -2,10 +2,10 @@ use crate::model::*;
 use client_utils::ApiClient;
 use mockall::automock;
 
-// re-exporting gives a nicer feeling of homogeneity to the users, and also gives us the freedom to change the definition of the result type transparently
-pub use client_utils::Result as Result;
-pub use client_utils::Error as Error;
 use protocol::record::RecordBatch;
+
+pub type Error = client_utils::Error<BrokerApiErrorKind>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[automock]
 pub trait Client : Send + Sync {
@@ -15,7 +15,7 @@ pub trait Client : Send + Sync {
 }
 
 pub struct ClientImpl {
-    api_client: ApiClient,
+    api_client: ApiClient<BrokerApiErrorKind>,
 }
 
 impl ClientImpl {
@@ -43,7 +43,7 @@ impl Client for ClientImpl {
         let response = self.api_client.post(POLL_BATCHES_RAW, PollBatchesRequest { topic, partition, consumer_group, poll_config })?;
         let ack_read_offset = match ApiClient::get_optional_header(READ_OFFSET_HEADER, &response)? {
             None => None,
-            Some(header) => Some(header.parse().map_err(|e| Error::Api(format!("Failed to parse {READ_OFFSET_HEADER} to u64 due to {e:?}")))?)
+            Some(header) => Some(header.parse().map_err(|e| Error::InvalidResponse(format!("Failed to parse {READ_OFFSET_HEADER} to u64 due to {e:?}")))?)
         };
 
         Ok(PollBatchesRawResponse {

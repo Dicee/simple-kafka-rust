@@ -21,6 +21,15 @@ pub const RECORD_COUNT: &str = "record_count";
 // headers
 pub const READ_OFFSET_HEADER: &str = "ack-read-offset";
 
+/// Public-facing errors for the broker service
+pub type BrokerApiError = client_utils::Error<BrokerApiErrorKind>;
+#[derive(Serialize, Deserialize, Debug)]
+pub enum BrokerApiErrorKind {
+    BadRequest,
+    CoordinatorFailure,
+    Internal,
+}
+
 #[derive(Deserialize)]
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct PublishRawRequest {

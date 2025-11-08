@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use crate::model::*;
-use client_utils::Result;
+use crate::client::Result;
 
 pub struct DummyClient {
     write_offsets: Mutex<HashMap<TopicPartition, u64>>,

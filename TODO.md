@@ -7,7 +7,6 @@
 
 ## Improvements
 
-- return fine-grained, strongly typed deserializable errors from my HTTP clients for API 4xx
 - add proper logging
 - add back-pressure in `BatchPublisher` to avoid being overwhelmed if publishing to the brokers is much slower than the producer is at sending records
 - replace SQLite in the coordinator with a Valkey Docker container with regular backups on a volume
@@ -39,6 +38,7 @@
 - ~~consider replacing panicking with custom error types in the protocol's ser/de~~ I think that's the right handling after all
 - use GET for read-only requests and serialize/deserialize the arguments in the URI rather than the body. I skipped this because I didn't want to write
   all this undifferentiated code, it's not the point of this project. Normally, you have frameworks taking care of that.
+- return fine-grained, strongly typed deserializable errors from my HTTP clients for API 4xx
 
 ## Optimizations
 

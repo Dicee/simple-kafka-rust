@@ -1,14 +1,15 @@
-use crate::broker::Error::{Coordinator, Io};
+use crate::broker::Error::{UnexpectedCoordinatorError, Io, CoordinatorApi};
 use crate::persistence::indexing::{self, IndexLookupResult};
 use crate::persistence::{AtomicReadAction, AtomicWriteAction, IndexedRecord, LogManager, RotatingAppendOnlyLog, RotatingLogReader};
 use broker::model::{PollBatchesRawResponse, PollConfig};
-use coordinator::model::{GetReadOffsetRequest, GetWriteOffsetRequest, IncrementWriteOffsetRequest};
+use coordinator::model::{CoordinatorApiErrorKind, GetReadOffsetRequest, GetWriteOffsetRequest, IncrementWriteOffsetRequest};
 use protocol::record::{deserialize_batch_metadata, read_batch_metadata, serialize_batch, RecordBatch, BATCH_METADATA_SIZE};
 use std::ops::Sub;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use std::{io, thread};
+use client_utils::ApiError;
 
 #[cfg(test)]
 #[path = "./broker_test.rs"]
@@ -21,8 +22,9 @@ pub struct Broker {
 
 #[derive(Debug)]
 pub enum Error {
+    CoordinatorApi(ApiError<CoordinatorApiErrorKind>),
     // convert to string to not carry more and more complexity as layers go. We won't need more granularity for our error handling.
-    Coordinator(String),
+    UnexpectedCoordinatorError(String),
     Io(io::Error), // those errors are closer to us since we are directly making IO operations, so we keep them granular
     Internal(String),
 }
@@ -35,7 +37,8 @@ impl Broker {
     /// Serializes and commits a batch of records to disk and returns the base offset of the batch. This method is meant for ease of testing
     /// at the moment and will be removed later, because serialization is normally performed by the publisher (which isn't written yet!).
     /// # Errors
-    /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
+    /// - [Error::CoordinatorApi] if an error explicitly modeled by the coordinator API occured while calling it
+    /// - [Error::UnexpectedCoordinatorError] if an unexpected error is encountered while calling the coordinator service
     /// - [Error::Io] if the write operation fails due to an IO error
     /// - [Error::Internal] if anything else fails
     pub fn publish(&self, topic: &str, partition: u32, record_batch: RecordBatch) -> Result<u64, Error> {
@@ -45,7 +48,8 @@ impl Broker {
 
     /// Writes and commits to disk the provided bytes and returns the base offset of the batch
     /// # Errors
-    /// - [Error::Coordinator] if any error is encountered while calling the coordinator service
+    /// - [Error::CoordinatorApi] if an error explicitly modeled by the coordinator API occured while calling it
+    /// - [Error::UnexpectedCoordinatorError] if an unexpected error is encountered while calling the coordinator service
     /// - [Error::Io] if the write operation fails due to an IO error
     /// - [Error::Internal] if anything else fails
     pub fn publish_raw(&self, topic: &str, partition: u32, bytes: Vec<u8>, record_count: u32) -> Result<u64, Error> {
@@ -217,7 +221,12 @@ fn open_log_at_record_offset(record_offset: u64, log_file_path: PathBuf, byte_of
 }
 
 impl From<coordinator::Error> for Error {
-    fn from(err: coordinator::Error) -> Self { Coordinator(format!("{err:?}")) }
+    fn from(e: coordinator::Error) -> Self {
+        match e {
+            coordinator::Error::Api(api_error) => CoordinatorApi(api_error),
+            _ => UnexpectedCoordinatorError(format!("{e:?}")),
+        }
+    }
 }
 
 impl From<io::Error> for Error {

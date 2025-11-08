@@ -1,10 +1,11 @@
 use super::*;
 use crate::mock_utils::expect_get_topic;
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
-use coordinator::model::GetTopicRequest;
+use coordinator::model::{CoordinatorApiErrorKind, GetTopicRequest};
 use mockall::predicate;
 use protocol::record::Record;
 use std::sync::Arc;
+use client_utils::ApiError;
 
 const TOPIC1: &str = "topic1";
 const TOPIC2: &str = "topic2";
@@ -84,11 +85,14 @@ fn test_select_partition_coordinator_failure() {
     let mut coordinator = coordinator::MockClient::new();
     coordinator.expect_get_topic()
         .with(predicate::eq(GetTopicRequest { name: TOPIC1.to_owned() }))
-        .returning(|_| { Err(coordinator::Error::Api(ERROR_MSG.to_owned())) });
+        .returning(|_| { Err(coordinator::Error::Api(ApiError { kind: CoordinatorApiErrorKind::Internal, message: ERROR_MSG.to_owned() })) });
 
     let mut partition_selector = PartitionSelector::new(Arc::new(coordinator));
     match partition_selector.select_partition(TOPIC1, &new_record(None)) {
-        Err(crate::common::Error::CoordinatorApi(msg)) => assert_that!(msg).is_equal_to(ERROR_MSG.to_owned()),
+        Err(crate::common::Error::CoordinatorApi(ApiError {
+             kind: CoordinatorApiErrorKind::Internal,
+             message
+         })) => assert_that!(message).is_equal_to(ERROR_MSG.to_owned()),
         _ => unreachable!(),
     }
 }

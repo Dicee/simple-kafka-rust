@@ -7,11 +7,13 @@ use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use argh::FromArgs;
 use ::broker::model::{PollBatchesRequest, PublishRawRequest, PublishResponse, TopicPartition, READ_OFFSET_HEADER};
 use broker::Error as BrokerError;
-use coordinator::model::RegisterBrokerRequest;
+use coordinator::model::{CoordinatorApiErrorKind, RegisterBrokerRequest};
 use coordinator::Client;
 use protocol::record::RecordBatch;
 use serde::Serialize;
 use std::sync::Arc;
+use ::broker::model::BrokerApiErrorKind::{BadRequest, CoordinatorFailure, Internal};
+use client_utils::ApiError;
 
 mod broker;
 mod persistence;
@@ -82,7 +84,7 @@ async fn poll_batches_raw(
             response.body(poll_response.bytes)
         }
         Ok(Err(e)) => convert_broker_error(e),
-        Err(_) => new_internal_failure_response(),
+        Err(e) => new_internal_failure_response(e.to_string()),
     }
 }
 
@@ -91,20 +93,28 @@ where F: Fn(T) -> R {
     match result {
         Ok(Ok(t)) => HttpResponse::Ok().json(converter(t)),
         Ok(Err(e)) => convert_broker_error(e),
-        Err(_) => new_internal_failure_response(),
+        Err(e) => new_internal_failure_response(e.to_string()),
     }
 }
 
 fn convert_broker_error(e: BrokerError) -> HttpResponse {
     match e {
-        BrokerError::Coordinator(msg) => HttpResponse::BadGateway().body(msg),
-        BrokerError::Io(e) => HttpResponse::InternalServerError().body(e.to_string()),
-        BrokerError::Internal(msg) => HttpResponse::InternalServerError().body(msg),
+        BrokerError::UnexpectedCoordinatorError(msg) => new_coordinator_failure_response(msg),
+        BrokerError::CoordinatorApi(e) => match e.kind {
+            CoordinatorApiErrorKind::Internal => new_coordinator_failure_response(e.message),
+            _ => HttpResponse::BadRequest().json(ApiError { kind: BadRequest, message: format!("{e:?}") })
+        },
+        BrokerError::Io(e) => new_internal_failure_response(e.to_string()),
+        BrokerError::Internal(msg) => new_internal_failure_response(msg),
     }
 }
 
-fn new_internal_failure_response() -> HttpResponse {
-    HttpResponse::InternalServerError().body("Internal failure with unknown cause")
+fn new_coordinator_failure_response(message: String) -> HttpResponse {
+    HttpResponse::BadGateway().json(ApiError { kind: CoordinatorFailure, message })
+}
+
+fn new_internal_failure_response(message: String) -> HttpResponse {
+    HttpResponse::InternalServerError().json(ApiError { kind: Internal, message })
 }
 
 #[actix_web::main]

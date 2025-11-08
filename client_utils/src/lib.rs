@@ -1,30 +1,42 @@
-use crate::Error::{Api, Ureq};
 use mockall::automock;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use std::io::Cursor;
+use std::marker::PhantomData;
 use std::time::Instant;
 use ureq::http::Response;
-use ureq::{self, Agent, Body, config::Config, SendBody};
+use ureq::{self, config::Config, Agent, Body, SendBody};
+use crate::Error::InvalidResponse;
 
 #[cfg(test)]
 #[path = "api_client_test.rs"]
 mod api_client_test;
 
 #[derive(Debug)]
-pub enum Error {
+pub enum Error<T> {
     Ureq(ureq::Error),
-    Api(String),
+    Api(ApiError<T>),
+    InvalidResponse(String),
 }
 
-pub struct ApiClient {
+// I had to move it out because ureq::Error is not serializable
+#[derive(Serialize, Deserialize)]
+#[derive(Debug)]
+pub struct ApiError<K> {
+    pub kind: K,
+    pub message: String
+}
+
+pub struct ApiClient<K: for<'de> Deserialize<'de>> {
     url_base: String,
     http_client: Box<dyn HttpClient>,
     debug: bool,
+    _marker: PhantomData<K>, // make the compiler happy about using K in the impl block but not as a field
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T, K> = std::result::Result<T, Error<K>>;
 
-impl ApiClient {
+impl <K: for<'de> Deserialize<'de>> ApiClient<K> {
     pub fn new(domain: String, debug: bool, use_tls: bool) -> Self {
         let config = Agent::config_builder()
             // I don't like the default handling because it doesn't return the body, which contains error messages
@@ -42,27 +54,29 @@ impl ApiClient {
             url_base: format!("{protocol}://{domain}"),
             http_client,
             debug,
+            _marker: PhantomData,
         }
     }
 
-    pub fn get<Res>(&self, api: &str) -> Result<Res> where for<'de> Res: Deserialize<'de> {
+    pub fn get<Res>(&self, api: &str) -> Result<Res, K> 
+    where for<'de> Res: Deserialize<'de> {
         let uri = format!("{}{api}", self.url_base);
         self.with_latency_logging(&format!("GET {uri}"), || Self::parse_response(self.http_client.get(&uri)?))
     }
 
-    pub fn post<Req: Serialize>(&self, api: &str, request: Req) -> Result<Response<Body>> {
+    pub fn post<Req: Serialize>(&self, api: &str, request: Req) -> Result<Response<Body>, K> {
         let uri = format!("{}{api}", self.url_base);
         self.with_latency_logging(&format!("POST {uri}"), || {
             let mut response = self.http_client.post(&uri, SendBody::from_json(&request)?)?;
             if !response.status().is_success() {
-                Err(Api(response.body_mut().read_to_string()?))
+                Err(Error::Api(response.body_mut().read_json()?))
             } else {
                 Ok(response)
             }
         })
     }
 
-    pub fn post_raw_and_parse<Res>(&self, api: &str, bytes: Vec<u8>) -> Result<Res>
+    pub fn post_raw_and_parse<Res>(&self, api: &str, bytes: Vec<u8>) -> Result<Res, K>
     where for<'de> Res: Deserialize<'de> {
         let uri = format!("{}{api}", self.url_base);
         self.with_latency_logging(&format!("POST {uri}"), || {
@@ -72,7 +86,7 @@ impl ApiClient {
         })
     }
 
-    pub fn post_and_parse<Req: Serialize, Res>(&self, api: &str, request: Req) -> Result<Res>
+    pub fn post_and_parse<Req: Serialize, Res>(&self, api: &str, request: Req) -> Result<Res, K>
     where for<'de> Res: Deserialize<'de> {
         let uri = format!("{}{api}", self.url_base);
         self.with_latency_logging(&format!("POST {uri}"), || {
@@ -80,9 +94,10 @@ impl ApiClient {
         })
     }
 
-    fn parse_response<Res>(mut response: Response<Body>) -> Result<Res> where for<'de> Res: Deserialize<'de> {
+    fn parse_response<Res>(mut response: Response<Body>) -> Result<Res, K>
+    where for<'de> Res: Deserialize<'de> {
         if !response.status().is_success() {
-            Err(Api(response.body_mut().read_to_string()?))
+            Err(Error::Api(response.body_mut().read_json()?))
         } else {
             Ok(response.body_mut().read_json()?)
         }
@@ -95,18 +110,18 @@ impl ApiClient {
         result
     }
 
-    pub fn get_required_header<'a>(header_key: &str, response: &'a Response<Body>) -> Result<&'a str> {
+    pub fn get_required_header<'a>(header_key: &str, response: &'a Response<Body>) -> Result<&'a str, K> {
         match Self::get_optional_header(header_key, response)? {
-            None => Err(Api(format!("Missing {header_key} header"))),
+            None => Err(InvalidResponse(format!("Missing {header_key} header"))),
             Some(header) => Ok(header)
         }
     }
 
-    pub fn get_optional_header<'a>(header_key: &str, response: &'a Response<Body>) -> Result<Option<&'a str>> {
+    pub fn get_optional_header<'a>(header_key: &str, response: &'a Response<Body>) -> Result<Option<&'a str>, K> {
         Ok(match response.headers().get(header_key) {
             None => None,
             Some(header) => Some(header.to_str()
-                .map_err(|e| Api(format!("Failed to parse {header_key} to string due to {e:?}")))?)
+                .map_err(|e| InvalidResponse(format!("Failed to parse {header_key} to string due to {e:?}")))?)
         })
     }
 }
@@ -138,6 +153,6 @@ impl HttpClient for HttpClientImpl {
     }
 }
 
-impl From<ureq::Error> for Error {
-    fn from(value: ureq::Error) -> Self { Ureq(value) }
+impl <K> From<ureq::Error> for Error<K> {
+    fn from(value: ureq::Error) -> Self { Error::Ureq(value) }
 }
