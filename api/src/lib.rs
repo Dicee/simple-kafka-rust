@@ -7,3 +7,5 @@ pub mod common;
 
 #[cfg(test)]
 mod mock_utils;
+
+mod semaphore;
