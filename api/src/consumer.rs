@@ -78,7 +78,7 @@ impl Client {
             consumer_states,
             state_index: 0,
             buffer: Box::new(std::iter::empty()),
-            broker_resolver: Arc::clone(&self.broker_resolver)
+            broker_resolver: Arc::clone(&self.broker_resolver),
         })
     }
 }
@@ -87,9 +87,7 @@ impl Iterator for ConsumerRecordIter {
     type Item = crate::common::Result<ConsumerRecord>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(record) = self.buffer.next() {
-            return Some(Ok(record));
-        }
+        if let Some(record) = self.buffer.next() { return Some(Ok(record)); }
 
         let state = self.consumer_states.get_mut(self.state_index).unwrap();
         let broker = self.broker_resolver.client_for(state.current_partition);

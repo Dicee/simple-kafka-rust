@@ -2,13 +2,21 @@ use crate::common::{self, broker_resolver::BrokerResolver, map_broker_error};
 use broker::model::TopicPartition;
 use protocol::record::{serialize_batch, RecordBatch};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::thread::JoinHandle;
+use crate::semaphore::Semaphore;
 
 #[cfg(test)]
 #[path = "./batch_publisher_test.rs"]
 mod batch_publisher_test;
+
+// We want to have some kind of back-pressure between the publisher thread and the producer thread(s). While most interactions between the two will be purely
+// fire-and-forget, if producer thread(s) are going too fast, they'll be throttled. If a request is large enough, it will take around 100 ms (pessimistic) so
+// 300 would be 30s, which is already a fair bit of delay between producer thread(s) and the publisher thread, but not yet dramatic. If the average request
+// is small, well maybe it should not be small! Efficiency comes from batching here, since we're dealing with network and IO that benefits from batching, so
+// have large enough requests is desirable.
+pub const MAX_INFLIGHT_REQUESTS: usize = 300;
 
 /// The [BatchPublisher] takes care of receiving [PublishRequest] instances on an MPSC blocking channel and process them sequentially on a single thread.
 /// This design ensures that ordering is respected: if a batch is sent before another one, we know we will publish it before. Of course, this is also
@@ -26,6 +34,7 @@ mod batch_publisher_test;
 pub struct BatchPublisher {
     join_handle: JoinHandle<()>,
     tx: Sender<PublishRequest>,
+    inflight_requests: Arc<Semaphore>,
 }
 
 struct PublishRequest {
@@ -36,14 +45,21 @@ struct PublishRequest {
 impl BatchPublisher {
     pub fn new(broker_resolver: BrokerResolver) -> Self {
         let (tx, rx) = mpsc::channel();
-        let join_handle = thread::spawn(|| BatchPublisherTask { broker_resolver, rx }.start_publish_loop());
-        Self { tx, join_handle }
+        let inflight_requests = Arc::new(Semaphore::new(MAX_INFLIGHT_REQUESTS));
+        let inflight_requests_clone = Arc::clone(&inflight_requests);
+        let join_handle = thread::spawn(||
+            BatchPublisherTask { broker_resolver, rx, inflight_requests: inflight_requests_clone, }.start_publish_loop()
+        );
+
+        Self { tx, join_handle, inflight_requests }
     }
 
-    /// Submits a publish task on the queue and returns immediately
+    /// Submits a publish task on the queue and returns immediately **unless** the number of inflight requests exceeds [MAX_INFLIGHT_REQUESTS],
+    /// in which case it will block until enough inflight requests complete (successfully or not).
     /// # Panicking
     /// This method will panic if the publish task has closed the channel on the receiving end, which should not be possible.
     pub fn publish_async(&self, topic_partition: TopicPartition, batch: RecordBatch) {
+        self.inflight_requests.acquire();
         self.tx.send(PublishRequest { topic_partition, batch }).expect("Receiver unexpectedly dropped");
     }
 
@@ -57,6 +73,7 @@ impl BatchPublisher {
 struct BatchPublisherTask {
     broker_resolver: BrokerResolver,
     rx: Receiver<PublishRequest>,
+    inflight_requests: Arc<Semaphore>,
 }
 
 impl BatchPublisherTask {
@@ -71,6 +88,7 @@ impl BatchPublisherTask {
                         // to be able to get something working end-to-end
                         eprintln!("Failed to publish batch for topic {} and partition {} due to {:?}", topic, partition, e);
                     }
+                    self.inflight_requests.release();
                 },
                 Err(_) => {
                     println!("Publish request sender disconnected, interrupting publish loop.");
