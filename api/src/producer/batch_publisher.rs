@@ -65,6 +65,8 @@ impl BatchPublisher {
 
     /// Terminates the publish thread and consumes ownership to discard this instance.
     pub fn shutdown(self) -> thread::Result<()> {
+        println!("Shutting batch publisher...");
+
         drop(self.tx); // prompt the publish loop to stop once all messages have been consumed
         self.join_handle.join()
     }

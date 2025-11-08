@@ -116,7 +116,7 @@ impl LogManager {
 
     /// Attempts shutting down the log manager gracefully (terminating all background threads, closing all file handles etc)
     pub fn shutdown(self) -> thread::Result<()> {
-        self.shutdown.store(true, atomic::Ordering::Relaxed);
+        self.shutdown.store(true, atomic::Ordering::Release);
 
         let log_files = Arc::into_inner(self.log_files)
             .expect("LogManager::shutdown called, but other Arc clones of log_files still exist.")
@@ -370,7 +370,7 @@ fn start_mpsc_request_loop<Req, Res, Err, F>(
     F: FnMut(&Req) -> Result<Res, Err>,
 {
     loop {
-        if shutdown.load(atomic::Ordering::Relaxed) { break }
+        if shutdown.load(atomic::Ordering::Acquire) { break }
 
         let request = match requests.recv_timeout(loop_timeout) {
             Ok(bytes) => bytes,

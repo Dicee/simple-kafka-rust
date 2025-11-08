@@ -26,6 +26,7 @@ const P1: u32 = 80; // happens to be the hash of "key" modulo PARTITION_COUNT1
 const P2: u32 = 16; // happens to be the hash of "key" modulo PARTITION_COUNT2
 
 #[test]
+#[timeout(200)]
 fn test_send_record_single_topic_partition_flushed_by_batch_size() {
     let max_batch_size = 3;
     // make sure the linger duration is so high that there's no way it happens in this test

@@ -98,11 +98,15 @@ impl Client {
 
     /// Terminates the batch reaper thread and consumes ownership to discard this instance.
     pub fn shutdown(self) -> thread::Result<()> {
-        self.shutdown.store(true, atomic::Ordering::Relaxed);
+        println!("Shutting down producer...");
+
+        self.shutdown.store(true, atomic::Ordering::Release);
         // Resume the reaper thread in case it was in indefinite wait mode (does it when it found the map empty). The shutdown flag set above will tell it
         // to break the loop.
         self.resume_reaping_notifier.notify_one();
         self.batch_reaper_handle.join()?;
+
+        println!("Successfully stopped the batch reaper thread, now flushing remaining batches.");
 
         // the reaper is now shut down, we should be the only ones still holding a reference to the batches
         match Arc::into_inner(self.batches) {
@@ -138,9 +142,9 @@ impl BatchReaperTask {
         loop {
             let mut batches = self.batches.lock().unwrap();
             batches = self.resume_reaping_notifier.wait_while(batches, |b|
-                b.is_empty() && !self.shutdown.load(atomic::Ordering::Relaxed)).unwrap();
+                b.is_empty() && !self.shutdown.load(atomic::Ordering::Acquire)).unwrap();
 
-            if self.shutdown.load(atomic::Ordering::Relaxed) { break }
+            if self.shutdown.load(atomic::Ordering::Acquire) { break }
 
             // Implementation note: we essentially rely on the iteration order of the linked list within the hash map to know which ones
             // were inserted first. That's why it's important to remove the entry once we flush the batch out, so that next time a record
@@ -159,8 +163,8 @@ impl BatchReaperTask {
             match batches.iter().next() {
                 Some((_, inflight_batch)) => {
                     let time_to_expiry =  self.config.linger_duration.sub(now.duration_since(inflight_batch.start));
-                    drop(batches); //  release the lock before sleeping
-                    thread::sleep(time_to_expiry);
+                    // not thread::sleep because we want to be woken up immediately if the producer is being shut down
+                    let _ = self.resume_reaping_notifier.wait_timeout(batches, time_to_expiry).unwrap();
                 }
                 None => continue,
             }

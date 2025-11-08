@@ -303,7 +303,7 @@ mod internal {
     }
 
     fn end_loop<T>(shutdown: Arc<AtomicBool>, handle: JoinHandle<T>) {
-        shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+        shutdown.store(true, std::sync::atomic::Ordering::Release);
         handle.join().unwrap();
     }
 
