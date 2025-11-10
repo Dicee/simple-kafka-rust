@@ -64,6 +64,7 @@ pub struct PollBatchesRequest {
     pub topic: String,
     pub partition: u32,
     pub consumer_group: String,
+    pub offset: u64,
     pub poll_config: PollConfig,
 }
 

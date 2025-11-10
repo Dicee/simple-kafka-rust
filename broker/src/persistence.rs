@@ -29,7 +29,7 @@ const INDEX_EXTENSION: &str = "index";
 const MAX_FILE_SIZE_BYTES: u64 = 10 * 1024 * 1024;
 // We don't need to shut down very fast, so we can afford having a slow loop, and it saves CPU cycles. Note
 // that we will still write as soon as a request arrives, we're only waiting when there is no request.
-const LOOP_TIMEOUT: Duration = Duration::from_secs(5);
+const LOOP_TIMEOUT: Duration = Duration::from_secs(2);
 
 const WORKER_THREAD_DISCONNECTED: &str = "The channel to the single-threaded worker that performing the read or write task \
     for this topic/partition(/consumer group) has been disconnected at one end or the other";
@@ -88,7 +88,7 @@ impl LogManager {
     /// - [BrokerError::Io] if an IO error occurs during the read operation
     /// - [BrokerError::Internal] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    pub fn atomic_read(&self, topic: &str, partition: u32, consumer_group: String, atomic_read: impl AtomicReadAction) -> Result<IndexedRecord, BrokerError> {
+    pub fn atomic_read(&self, topic: &str, partition: u32, consumer_group: String, atomic_read: impl AtomicReadAction) -> Result<RawBatch, BrokerError> {
         self.get_or_create_partition_manager(topic, partition, BrokerError::Io)?.atomic_read(consumer_group, atomic_read)
     }
 
@@ -207,7 +207,7 @@ impl PartitionLogManager {
     /// - [BrokerError::Io] if an IO error occurs during the read operation
     /// - [BrokerError::Internal] if the reader thread has been dropped. Should not happen, of course. If it does, rebooting the broker
     ///   is likely required.
-    fn atomic_read(&self, consumer_group: String, atomic_action: impl AtomicReadAction) -> Result<IndexedRecord, BrokerError> {
+    fn atomic_read(&self, consumer_group: String, atomic_action: impl AtomicReadAction) -> Result<RawBatch, BrokerError> {
         let atomic_action = Box::new(atomic_action);
         let mut consumers_guard = self.consumers.lock().unwrap();
         let consumer_manager = match consumers_guard.entry(consumer_group.clone()) {
@@ -215,6 +215,7 @@ impl PartitionLogManager {
             Entry::Vacant(entry) => {
                 let (reader_tx, reader_rx) = std::sync::mpsc::channel();
                 let mut reader = PartitionLogReader {
+                    root_path: self.root_path.clone(),
                     reader: atomic_action.initialize(&self.root_path)?,
                     read_requests: reader_rx,
                     shutdown: Arc::clone(&self.shutdown),
@@ -322,7 +323,7 @@ impl MpscRequest<u64, BrokerError> for WriteRequest {
 
 struct ReadRequest {
     atomic_action: Box<dyn AtomicReadAction>,
-    response_tx: oneshot::Sender<Result<IndexedRecord, BrokerError>>,
+    response_tx: oneshot::Sender<Result<RawBatch, BrokerError>>,
 }
 
 /// This trait allows to inject read external logic with the guarantee that the provided [RotatingLogReader] is only available on a single thread,
@@ -335,14 +336,23 @@ struct ReadRequest {
 pub trait AtomicReadAction : Send + 'static {
     fn initialize(&self, root_path: &str) -> Result<RotatingLogReader, BrokerError>;
 
-    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, BrokerError>;
+    fn read_from(&self, root_path: &str, reader: &mut RotatingLogReader) -> Result<RawBatch, BrokerError>;
 }
 
 #[derive(Eq, PartialEq, Debug)]
-pub struct IndexedRecord(pub u64, pub Vec<u8>);
+pub struct RawBatch {
+    pub base_offset: u64,
+    pub record_count: u32,
+    pub bytes: Vec<u8>,
+}
+
+impl RawBatch {
+    pub fn empty() -> Self { Self { base_offset: 0, record_count: 0, bytes: Vec::new() } }
+}
 
 /// Handles the resources and logic to continuously read from a rotating log file for a single partition.
 struct PartitionLogReader {
+    root_path: String,
     reader: RotatingLogReader,
     read_requests: Receiver<ReadRequest>,
     shutdown: Arc<AtomicBool>,
@@ -350,13 +360,13 @@ struct PartitionLogReader {
 
 impl PartitionLogReader {
     fn start_read_loop(&mut self, loop_timeout: Duration, description: String) {
-        start_mpsc_request_loop(&self.read_requests, |request| request.atomic_action.read_from(&mut self.reader),
+        start_mpsc_request_loop(&self.read_requests, |request| request.atomic_action.read_from(&self.root_path, &mut self.reader),
             loop_timeout, &self.shutdown, description);
     }
 }
 
-impl MpscRequest<IndexedRecord, BrokerError> for ReadRequest {
-    fn response_tx(self) -> oneshot::Sender<Result<IndexedRecord, BrokerError>> { self.response_tx }
+impl MpscRequest<RawBatch, BrokerError> for ReadRequest {
+    fn response_tx(self) -> oneshot::Sender<Result<RawBatch, BrokerError>> { self.response_tx }
 }
 
 fn start_mpsc_request_loop<Req, Res, Err, F>(

@@ -1,4 +1,4 @@
-use super::{AtomicReadAction, AtomicWriteAction, IndexedRecord, LogManager, MockAtomicReadAction, RotatingAppendOnlyLog};
+use super::{AtomicReadAction, AtomicWriteAction, RawBatch, LogManager, MockAtomicReadAction, RotatingAppendOnlyLog};
 use crate::broker::Error as BrokerError;
 use crate::persistence::log_reader::RotatingLogReader;
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
@@ -83,7 +83,7 @@ fn test_atomic_read() {
     read_action.expect_initialize().returning(|root_path| Ok(RotatingLogReader::open_for_index(root_path.to_owned(), 0)?));
     read_action
         .expect_read_from()
-        .returning(|log_reader| {
+        .returning(|_, log_reader| {
             let mut bytes = Vec::new();
             log_reader.seek(5)?;
             thread::sleep(Duration::from_millis(10));
@@ -93,7 +93,7 @@ fn test_atomic_read() {
             thread::sleep(Duration::from_millis(100));
 
             bytes.extend(log_reader.read(4)?); // " hon"
-            Ok(IndexedRecord(0, bytes))
+            Ok(RawBatch { base_offset: 0, record_count: 1, bytes })
         });
 
     assert_read_bytes_are(log_manager.atomic_read("topic1", 0, GROUP1.to_owned(), read_action), "r! It's hon");
@@ -134,8 +134,8 @@ fn write_to(log_manager: &mut LogManager, topic: &str, partition: u32, content: 
     log_manager.atomic_write(topic, partition, WriteAndCommit(0, content.as_bytes().to_vec())).unwrap();
 }
 
-fn assert_read_bytes_are(result: Result<IndexedRecord, BrokerError>, expected: &str) {
-    let actual: &str = &String::from_utf8(result.unwrap().1).unwrap();
+fn assert_read_bytes_are(result: Result<RawBatch, BrokerError>, expected: &str) {
+    let actual: &str = &String::from_utf8(result.unwrap().bytes).unwrap();
     assert_that!(actual).is_equal_to(expected);
 }
 
@@ -156,8 +156,8 @@ impl AtomicReadAction for SingleRead {
         Ok(RotatingLogReader::open_for_index(root_path.to_owned(), 0)?)
     }
 
-    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, BrokerError> {
-        Ok(IndexedRecord(0, reader.read(self.0)?))
+    fn read_from(&self, _: &str, reader: &mut RotatingLogReader) -> Result<RawBatch, BrokerError> {
+        Ok(RawBatch { base_offset: 0, record_count: 1, bytes: reader.read(self.0)? })
     }
 }
 
@@ -168,9 +168,9 @@ impl AtomicReadAction for SingleSeek {
         Ok(RotatingLogReader::open_for_index(root_path.to_owned(), 0)?)
     }
     
-    fn read_from(&self, reader: &mut RotatingLogReader) -> Result<IndexedRecord, BrokerError> {
+    fn read_from(&self, _: &str, reader: &mut RotatingLogReader) -> Result<RawBatch, BrokerError> {
         reader.seek(self.0)?;
-        Ok(IndexedRecord(0, vec![]))
+        Ok(RawBatch::empty())
     }
 }
 

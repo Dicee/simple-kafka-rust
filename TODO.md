@@ -1,14 +1,8 @@
 # TODO
 
-## Features
-
-- add an API on the broker to initialize a reader to the proper offset. This is in case a consumer dies and then reconnects, without having acknowledged the
-  records it had read. This allows the client to rewind the stream to where it left off.
-
 ## Improvements
 
 - add proper logging
-- add back-pressure in `BatchPublisher` to avoid being overwhelmed if publishing to the brokers is much slower than the producer is at sending records
 - replace SQLite in the coordinator with a Valkey Docker container with regular backups on a volume
 - make errors more traceable, so that it's easier to know exactly where they were thrown from
 
@@ -19,18 +13,19 @@
   have a high cost)
 - use async IO rather than threads with blocking operations (e.g. Tokio's `BufReader/BufWriter`)
 - use async tasks (one per topic/partition probably) in `BatchPublisher`
+- make the indexing logic faster (we should not have to list all files within the partition every time)
 
 ## Scalability
 
 - change the multithreading model in the broker as having one thread per topic/partition for writes, and one per topic/partition/consumer group is a simple model
   to ensure atomicity, but wouldn't be scalable to a large number of topics/partitions, or would require spreading them across a very large number of brokers
 
-## Bugs
-
-- we might need to use `read` rather than `read_exact` to implement `read_u64_le` because if we're unlucky the write buffer might be flushed while writing the offset,
-  before all bytes of the offset have been written, and the reader might see this data and fail to read a `u64`.
-
 # Done
+
+## Features
+
+- add an API on the broker to initialize a reader to the proper offset. This is in case a consumer dies and then reconnects, without having acknowledged the
+  records it had read. This allows the client to rewind the stream to where it left off.
 
 ## Improvements
 
@@ -39,6 +34,7 @@
 - use GET for read-only requests and serialize/deserialize the arguments in the URI rather than the body. I skipped this because I didn't want to write
   all this undifferentiated code, it's not the point of this project. Normally, you have frameworks taking care of that.
 - return fine-grained, strongly typed deserializable errors from my HTTP clients for API 4xx
+- add back-pressure in `BatchPublisher` to avoid being overwhelmed if publishing to the brokers is much slower than the producer is at sending records
 
 ## Optimizations
 
@@ -48,3 +44,5 @@
 
 - move from simple-server to actix-web, as it seems like even in simple use cases simple-server has a bug causing transient issues with the body being empty
   even when the client sent a non-empty body
+- we might need to use `read` rather than `read_exact` to implement `read_u64_le` because if we're unlucky the write buffer might be flushed while writing the offset,
+  before all bytes of the offset have been written, and the reader might see this data and fail to read a `u64`.

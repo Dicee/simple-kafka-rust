@@ -84,7 +84,7 @@ fn select_client_for(broker_resolver: &BrokerResolver, partition: u32) {
     let poll_config = PollConfig { max_batches: 1, max_wait: Duration::from_secs(1) };
 
     broker_resolver.client_for(partition)
-        .poll_batches_raw(topic, partition, consumer_group, poll_config)
+        .poll_batches_raw(topic, partition, consumer_group, 0, poll_config)
         .unwrap();
 }
 
@@ -111,7 +111,7 @@ struct DummyBrokerClient {
 }
 
 impl broker::Client for DummyBrokerClient {
-    fn poll_batches_raw(&self, _: String, partition: u32, _: String, _: PollConfig) -> broker::Result<PollBatchesRawResponse> {
+    fn poll_batches_raw(&self, _: String, partition: u32, _: String, _: u64, _: PollConfig) -> broker::Result<PollBatchesRawResponse> {
         let mut calls = self.calls.lock().unwrap();
         calls.entry((self.host.clone(), partition)).and_modify(|c| *c += 1).or_insert_with(|| 1);
         Ok(PollBatchesRawResponse { ack_read_offset: Some(17), bytes: vec![]  })

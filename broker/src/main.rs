@@ -5,15 +5,15 @@ use crate::persistence::LogManager;
 use actix_web::error::BlockingError;
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use argh::FromArgs;
+use ::broker::model::BrokerApiErrorKind::{BadRequest, CoordinatorFailure, Internal};
 use ::broker::model::{PollBatchesRequest, PublishRawRequest, PublishResponse, TopicPartition, READ_OFFSET_HEADER};
 use broker::Error as BrokerError;
+use client_utils::ApiError;
 use coordinator::model::{CoordinatorApiErrorKind, RegisterBrokerRequest};
 use coordinator::Client;
 use protocol::record::RecordBatch;
 use serde::Serialize;
 use std::sync::Arc;
-use ::broker::model::BrokerApiErrorKind::{BadRequest, CoordinatorFailure, Internal};
-use client_utils::ApiError;
 
 mod broker;
 mod persistence;
@@ -65,17 +65,15 @@ async fn publish_raw(
     )
 }
 
-// Note this is a post because it modifies some state on the server. Ideally the client should just send an offset to read from, but for now we
-// do not have an operation capable of reinitializing the state of the reader on the broker side if we notice that the request offset is not the
-// one the reader is currently tracking. For simplicity's sake, we'll keep the stateful API for now (I want to get things to work end-to-end before
-// working on smaller improvements).
+// Note this is a post because it modifies some state on the server (to be efficient, we obviously cannot afford creating a new reader and finding
+// the right offset every time, so we reuse the same BufReader most of the time, and that's a stateful struct).
 #[post("/poll-batches-raw")]
 async fn poll_batches_raw(
     broker: web::Data<Arc<Broker>>,
     request: web::Json<PollBatchesRequest>,
 ) -> impl Responder {
-    let PollBatchesRequest { topic, partition, consumer_group, poll_config } = request.into_inner();
-    match web::block(move || { broker.poll_batches_raw(&topic, partition, consumer_group, &poll_config) }).await {
+    let PollBatchesRequest { topic, partition, consumer_group, offset, poll_config } = request.into_inner();
+    match web::block(move || { broker.poll_batches_raw(&topic, partition, consumer_group, offset, &poll_config) }).await {
         Ok(Ok(poll_response)) => {
             let mut response = HttpResponse::Ok();
             if let Some(ack_read_offset) = poll_response.ack_read_offset {
@@ -99,14 +97,19 @@ where F: Fn(T) -> R {
 
 fn convert_broker_error(e: BrokerError) -> HttpResponse {
     match e {
+        BrokerError::InvalidReadOffset(cause) => new_bad_request_response(format!("{cause}")),
         BrokerError::UnexpectedCoordinatorError(msg) => new_coordinator_failure_response(msg),
         BrokerError::CoordinatorApi(e) => match e.kind {
             CoordinatorApiErrorKind::Internal => new_coordinator_failure_response(e.message),
-            _ => HttpResponse::BadRequest().json(ApiError { kind: BadRequest, message: format!("{e:?}") })
+            _ => new_bad_request_response(format!("{e:?}")),
         },
         BrokerError::Io(e) => new_internal_failure_response(e.to_string()),
         BrokerError::Internal(msg) => new_internal_failure_response(msg),
     }
+}
+
+fn new_bad_request_response(message: String) -> HttpResponse {
+    HttpResponse::BadRequest().json(ApiError { kind: BadRequest, message })
 }
 
 fn new_coordinator_failure_response(message: String) -> HttpResponse {

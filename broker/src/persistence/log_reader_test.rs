@@ -2,7 +2,7 @@ use crate::persistence::log_reader::{LogReader, RotatingLogReader};
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
 use file_test_utils::{TempTestDir, TempTestFile};
 use std::{fs, io};
-use crate::persistence::get_log_path;
+use crate::persistence::{get_log_path, RotatingAppendOnlyLog};
 use crate::persistence::indexing::{LogIndexWriter};
 
 #[test]
@@ -57,7 +57,7 @@ fn test_log_reader_read_exact_eof() {
 }
 
 #[test]
-fn test_log_reader_read_u64_le() {
+fn test_log_reader_try_read_u64_le() {
     let temp_file = TempTestFile::create();
 
     let first: u64 = 678;
@@ -70,20 +70,21 @@ fn test_log_reader_read_u64_le() {
 
     let mut log_reader = LogReader::open(temp_file.path()).unwrap();
 
-    assert_that!(log_reader.read_u64_le()).has_ok(first);
-    assert_that!(log_reader.read_u64_le()).has_ok(second);
+    assert_that!(log_reader.try_read_u64_le()).has_ok(Some(first));
+    assert_that!(log_reader.try_read_u64_le()).has_ok(Some(second));
 }
 
 #[test]
-fn test_log_reader_read_u64_le_nof_enough_bytes() {
+fn test_log_reader_try_read_u64_le_nof_enough_bytes() {
     let temp_file = TempTestFile::create();
-    fs::write(temp_file.path(), &12u64.to_le_bytes()[0..7]).unwrap();
+    let bytes = 12u64.to_le_bytes();
+    fs::write(temp_file.path(), &bytes[0..7]).unwrap();
 
     let mut log_reader = LogReader::open(temp_file.path()).unwrap();
-    match log_reader.read_u64_le() {
-        Err(e) => assert_eq!(e.kind(), io::ErrorKind::UnexpectedEof),
-        Ok(_) => unreachable!(),
-    }
+    assert_that!(log_reader.try_read_u64_le()).has_ok(None);
+    
+    fs::write(temp_file.path(), &bytes).unwrap();
+    assert_that!(log_reader.try_read_u64_le()).has_ok(Some(12));
 }
 
 #[test]
@@ -137,6 +138,68 @@ fn test_rotating_log_reader_open_at_offset_more_than_bytes_in_file() {
 }
 
 #[test]
+fn test_rotating_log_reader_reset_to_offset_different_file() {
+    let temp_dir = TempTestDir::create();
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
+    fs::create_dir_all(root_path.clone()).unwrap();
+
+    let file_name_1 = "00003.log";
+    let file_name_2 = "00004.log";
+    write_to_file(&root_path, file_name_1, "hello world! Nice to meet you!");
+    write_to_file(&root_path, file_name_2, "We're not so nice in this file, this is the EVIL file");
+
+    let log_path = temp_dir.resolve(&root_path).join(file_name_1);
+    let mut log_reader = RotatingLogReader::open_at_offset(log_path, 10).unwrap();
+
+    assert_read_bytes_are(log_reader.read(12), "d! Nice to m");
+    assert_read_bytes_are(log_reader.read(1), "e");
+
+    let log_path = temp_dir.resolve(&root_path).join(file_name_2);
+    log_reader.reset_to_offset(log_path, 32).unwrap();
+
+    assert_read_bytes_are(log_reader.read(16), "this is the EVIL");
+    log_reader.seek(1).unwrap();
+    assert_read_bytes_are(log_reader.read(4), "file");
+}
+
+#[test]
+fn test_rotating_log_reader_reset_to_offset_same_file() {
+    let temp_dir = TempTestDir::create();
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
+    fs::create_dir_all(root_path.clone()).unwrap();
+
+    let file_name = "00003.log";
+    write_to_file(&root_path, file_name, "hello world! Nice to meet you!");
+
+    let log_path = temp_dir.resolve(&root_path).join(file_name);
+    let mut log_reader = RotatingLogReader::open_at_offset(log_path.clone(), 10).unwrap();
+
+    assert_read_bytes_are(log_reader.read(12), "d! Nice to m");
+    assert_read_bytes_are(log_reader.read(1), "e");
+
+    log_reader.reset_to_offset(log_path, 6).unwrap();
+
+    assert_read_bytes_are(log_reader.read(16), "world! Nice to m");
+}
+
+#[test]
+fn test_rotating_log_reader_reset_to_start() {
+    let temp_dir = TempTestDir::create();
+    let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
+    fs::create_dir_all(root_path.clone()).unwrap();
+
+    let file_name = "00003.log";
+    write_to_file(&root_path, file_name, "hello world! Nice to meet you!");
+
+    let log_path = temp_dir.resolve(&root_path).join(file_name);
+    let mut log_reader = RotatingLogReader::open_at_offset(log_path.clone(), 10).unwrap();
+
+    assert_read_bytes_are(log_reader.read(12), "d! Nice to m");
+    log_reader.reset_to_start().unwrap();
+    assert_read_bytes_are(log_reader.read(16), "hello world! Nic");
+}
+
+#[test]
 fn test_rotating_log_reader_read_moves_to_next_file() {
     let temp_dir = TempTestDir::create();
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
@@ -156,25 +219,49 @@ fn test_rotating_log_reader_read_moves_to_next_file() {
 }
 
 #[test]
-fn test_rotating_log_reader_read_u64_le_moves_to_next_file() {
+fn test_rotating_log_reader_try_read_u64_is_no_op_if_not_enough_bytes_available_and_rotates_when_needed() {
     let temp_dir = TempTestDir::create();
     let root_path = format!("{}/my-topic/partition=12/", temp_dir.path_as_str());
     fs::create_dir_all(root_path.clone()).unwrap();
 
-    let mut content1 = Vec::new();
-    content1.extend(123u64.to_le_bytes());
-    content1.extend(456u64.to_le_bytes());
+    let mut content = Vec::new();
+    content.extend(123u64.to_le_bytes());
+    content.extend(456u64.to_le_bytes());
+    content.extend(789u64.to_le_bytes()); // should be in another file since the log created below rotates after 16 bytes
 
-    fs::write(&format!("{root_path}00003.log"), &content1).unwrap();
-    fs::write(&format!("{root_path}00004.log"), &789u64.to_le_bytes()).unwrap();
+    let mut log = RotatingAppendOnlyLog::open_latest(root_path.clone(), 16).unwrap();
+    let mut log_reader = RotatingLogReader::open_for_index(root_path, 0).unwrap();
 
-    ensure_index_file_contains_reference_to_next(&root_path, 3, content1.len() as u64);
+    write_indexable_and_flush(&mut log, 0, &content[0..4]);
+    assert_that!(log_reader.try_read_u64_le()).has_ok(None);
 
-    let mut log_reader = RotatingLogReader::open_for_index(root_path, 3).unwrap();
-    assert_that!(log_reader.read_u64_le()).has_ok(Some(123));
-    assert_that!(log_reader.read_u64_le()).has_ok(Some(456));
-    assert_that!(log_reader.read_u64_le()).has_ok(Some(789));
-    assert_that!(log_reader.read_u64_le()).has_ok(None);
+    write_and_flush(&mut log, &content[4..7]);
+    assert_that!(log_reader.try_read_u64_le()).has_ok(None);
+
+    write_and_flush(&mut log, &content[7..8]);
+    assert_that!(log_reader.try_read_u64_le()).has_ok(Some(123));
+
+    write_indexable_and_flush(&mut log, 1, &content[8..14]);
+    assert_that!(log_reader.try_read_u64_le()).has_ok(None);
+
+    write_and_flush(&mut log, &content[14..16]);
+    assert_that!(log_reader.try_read_u64_le()).has_ok(Some(456));
+
+    write_indexable_and_flush(&mut log, 2, &content[16..18]); // a rotation happens here
+    assert_that!(log_reader.try_read_u64_le()).has_ok(None);
+
+    write_and_flush(&mut log, &content[18..24]);
+    assert_that!(log_reader.try_read_u64_le()).has_ok(Some(789));
+}
+
+fn write_indexable_and_flush(log: &mut RotatingAppendOnlyLog, index: u64, content: &[u8]) {
+    log.write_all_indexable(index, content).unwrap();
+    log.flush().unwrap();
+}
+
+fn write_and_flush(log: &mut RotatingAppendOnlyLog, content: &[u8]) {
+    log.write_all(content).unwrap();
+    log.flush().unwrap();
 }
 
 #[test]

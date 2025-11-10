@@ -105,8 +105,8 @@ fn test_subscribe_single_topic_broker_fails_then_succeeds() {
     let call_index = Rc::new(AtomicU32::new(0));
 
     broker.expect_poll_batches_raw()
-        .with(eq(TOPIC1.to_owned()), eq(0), eq(CONSUMER_GROUP.to_owned()), eq(POLL_CONFIG))
-        .returning_st(move |_, _, _, _| match call_index.fetch_add(1, Ordering::Relaxed) {
+        .with(eq(TOPIC1.to_owned()), eq(0), eq(CONSUMER_GROUP.to_owned()), eq(0), eq(POLL_CONFIG))
+        .returning_st(move |_, _, _, _, _| match call_index.fetch_add(1, Ordering::Relaxed) {
             0 => Err(broker::Error::Api(ApiError { kind: BrokerApiErrorKind::Internal, message: error_msg.to_owned() })),
             _ => Ok(new_poll_response(to_bytes(0, vec![new_batch(vec![new_record("hello"), new_record("world")])]))),
         });
@@ -177,8 +177,8 @@ fn set_up_coordinator() -> Arc<dyn coordinator::Client> {
 fn expect_poll_batches_raw(broker: &mut broker::MockClient, topic: &str, partition: u32, expected: Vec<PollBatchesRawResponse>) {
     let expected = RefCell::new(expected);
     broker.expect_poll_batches_raw()
-        .with(eq(topic.to_owned()), eq(partition), eq(CONSUMER_GROUP.to_owned()), eq(POLL_CONFIG))
-        .returning(move |_, _, _, _| Ok(expected.borrow_mut().remove(0)));
+        .with(eq(topic.to_owned()), eq(partition), eq(CONSUMER_GROUP.to_owned()), eq(0), eq(POLL_CONFIG))
+        .returning(move |_, _, _, _, _| Ok(expected.borrow_mut().remove(0)));
 }
 
 fn assert_that_next_is(iter: &mut ConsumerRecordIter, topic: &str, partition: u32, offset: u64, value: &str) {
