@@ -92,7 +92,7 @@ impl Iterator for ConsumerRecordIter {
         let broker = self.broker_resolver.client_for(state.current_partition);
 
         // TODO: read the correct offset
-        match broker.poll_batches_raw(state.topic.clone(), state.current_partition, self.consumer_group.clone(), 0, self.poll_config) {
+        match broker.poll_batches_raw(&state.topic, state.current_partition, &self.consumer_group, 0, self.poll_config) {
             Err(e) => return Some(Err(map_broker_error(e))),
             Ok(response) => self.buffer = Box::new(Self::decode_records(&state.topic, state.current_partition, response.bytes).into_iter())
         }

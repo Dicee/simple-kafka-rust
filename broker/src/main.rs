@@ -56,11 +56,14 @@ async fn publish(
 #[post("/publish-raw")]
 async fn publish_raw(
     broker: web::Data<Arc<Broker>>,
-    query: web::Query<PublishRawRequest>,
+    query: web::Query<PublishRawRequest<'_>>,
     body: web::Bytes,
 ) -> impl Responder {
+    let PublishRawRequest { topic, partition, record_count } = query.into_inner();
+    let topic = topic.into_owned();
+
     build_json_http_response(
-        web::block(move || { broker.publish_raw(&query.topic, query.partition, body.to_vec(), query.record_count) }).await,
+        web::block(move || { broker.publish_raw(&topic, partition, body.to_vec(), record_count) }).await,
         |base_offset| PublishResponse { base_offset }
     )
 }
@@ -70,10 +73,13 @@ async fn publish_raw(
 #[post("/poll-batches-raw")]
 async fn poll_batches_raw(
     broker: web::Data<Arc<Broker>>,
-    request: web::Json<PollBatchesRequest>,
+    request: web::Json<PollBatchesRequest<'_>>,
 ) -> impl Responder {
     let PollBatchesRequest { topic, partition, consumer_group, offset, poll_config } = request.into_inner();
-    match web::block(move || { broker.poll_batches_raw(&topic, partition, consumer_group, offset, &poll_config) }).await {
+    let topic = topic.into_owned();
+    let consumer_group = consumer_group.into_owned();
+
+    match web::block(move || broker.poll_batches_raw(&topic, partition, consumer_group, offset, &poll_config)).await {
         Ok(Ok(poll_response)) => {
             let mut response = HttpResponse::Ok();
             if let Some(ack_read_offset) = poll_response.ack_read_offset {

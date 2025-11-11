@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use protocol::record::RecordBatch;
@@ -32,8 +33,8 @@ pub enum BrokerApiErrorKind {
 
 #[derive(Deserialize)]
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
-pub struct PublishRawRequest {
-    pub topic: String,
+pub struct PublishRawRequest<'a> {
+    pub topic: Cow<'a, str>,
     pub partition: u32,
     pub record_count: u32,
 }
@@ -41,7 +42,7 @@ pub struct PublishRawRequest {
 #[derive(Deserialize)]
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct TopicPartition {
-    pub topic: String,
+    pub topic: String, // used in hash maps so it's easier to have this as owned data
     pub partition: u32,
 }
 
@@ -64,10 +65,10 @@ pub struct RecordBatchWithOffset {
 
 #[derive(Serialize, Deserialize)]
 #[derive(Eq, PartialEq, Debug)]
-pub struct PollBatchesRequest {
-    pub topic: String,
+pub struct PollBatchesRequest<'a> {
+    pub topic: Cow<'a, str>,
     pub partition: u32,
-    pub consumer_group: String,
+    pub consumer_group: Cow<'a, str>,
     pub offset: u64,
     pub poll_config: PollConfig,
 }
