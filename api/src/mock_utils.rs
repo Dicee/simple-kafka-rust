@@ -1,6 +1,6 @@
 use crate::common::broker_resolver::{BrokerResolver, MockBrokerClientFactory};
 use broker::model::PublishResponse;
-use coordinator::model::{GetTopicRequest, GetTopicResponse, HostAndPort, ListBrokersResponse};
+use coordinator::model::{GetTopicResponse, HostAndPort, ListBrokersResponse};
 use mockall::Predicate;
 use predicates::ord::eq;
 use predicates::prelude::predicate;
@@ -27,9 +27,10 @@ pub(crate) fn expect_list_brokers(coordinator: &mut coordinator::MockClient) {
 }
 
 pub(crate) fn expect_get_topic(coordinator: &mut coordinator::MockClient, topic: &str, partition_count: u32) {
+    let topic = topic.to_owned();
     coordinator.expect_get_topic()
-        .with(eq(GetTopicRequest { name: topic.to_owned() }))
-        .returning(move |request| Ok(GetTopicResponse { name: request.name, partition_count }));
+        .with(eq(topic))
+        .returning(move |name| Ok(GetTopicResponse { name: name.to_owned(), partition_count }));
 }
 
 pub(crate) fn expect_publish_raw(broker: &mut broker::MockClient, topic: &str, partition: u32, batch: RecordBatch) {

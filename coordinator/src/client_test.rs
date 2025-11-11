@@ -1,12 +1,14 @@
+use crate::model::GetTopicResponse;
 use crate::{Client, ClientImpl};
+use assertor::{assert_that, ResultAssertion};
 use client_utils::{ApiClient, HttpClient, MockHttpClient};
+use mockall::predicate::eq;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use assertor::{assert_that, ResultAssertion};
-use mockall::predicate::eq;
-use ureq::Body;
 use ureq::http::Response;
-use crate::model::{GetTopicRequest, GetTopicResponse};
+use ureq::Body;
+
+const TOPIC: &str = "topic";
 
 #[test]
 fn test_get_topic_is_cached() {
@@ -28,11 +30,11 @@ fn test_get_topic_is_cached() {
         api_client,
     };
 
-    let expected_response = GetTopicResponse { name: "topic".to_owned(), partition_count: 103 };
+    let expected_response = GetTopicResponse { name: TOPIC.into(), partition_count: 103 };
 
     // called 4 times but mock HTTP client only called once
-    assert_that!(coordinator_client.get_topic(GetTopicRequest { name: "topic".to_owned() })).has_ok(expected_response.clone());
-    assert_that!(coordinator_client.get_topic(GetTopicRequest { name: "topic".to_owned() })).has_ok(expected_response.clone());
-    assert_that!(coordinator_client.get_topic(GetTopicRequest { name: "topic".to_owned() })).has_ok(expected_response.clone());
-    assert_that!(coordinator_client.get_topic(GetTopicRequest { name: "topic".to_owned() })).has_ok(expected_response);
+    assert_that!(coordinator_client.get_topic(TOPIC)).has_ok(expected_response.clone());
+    assert_that!(coordinator_client.get_topic(TOPIC)).has_ok(expected_response.clone());
+    assert_that!(coordinator_client.get_topic(TOPIC)).has_ok(expected_response.clone());
+    assert_that!(coordinator_client.get_topic(TOPIC)).has_ok(expected_response);
 }

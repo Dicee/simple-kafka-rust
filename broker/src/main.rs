@@ -9,7 +9,7 @@ use ::broker::model::BrokerApiErrorKind::{BadRequest, CoordinatorFailure, Intern
 use ::broker::model::{PollBatchesRequest, PublishRawRequest, PublishResponse, TopicPartition, READ_OFFSET_HEADER};
 use broker::Error as BrokerError;
 use client_utils::ApiError;
-use coordinator::model::{CoordinatorApiErrorKind, RegisterBrokerRequest};
+use coordinator::model::CoordinatorApiErrorKind;
 use coordinator::Client;
 use protocol::record::RecordBatch;
 use serde::Serialize;
@@ -125,7 +125,7 @@ async fn main() -> std::io::Result<()> {
     let args: Args = argh::from_env();
 
     let coordinator_client = coordinator::ClientImpl::new(args.coordinator_endpoint);
-    coordinator_client.register_broker(RegisterBrokerRequest { host: args.host.clone(), port: args.port })
+    coordinator_client.register_broker(&args.host, args.port)
         .expect("Failed to register broker to the coordinator service");
 
     let broker = Arc::new(Broker::new(LogManager::new(args.root_path), Arc::new(coordinator_client)));

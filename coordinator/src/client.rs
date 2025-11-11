@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use crate::model::*;
 use client_utils::ApiClient;
 use mockall::automock;
@@ -13,13 +14,13 @@ mod client_test;
 
 #[automock]
 pub trait Client : Send + Sync {
-    fn create_topic(&self, request: CreateTopicRequest) -> Result<()>;
-    fn get_topic(&self, request: GetTopicRequest) -> Result<GetTopicResponse>;
-    fn increment_write_offset(&self, request: IncrementWriteOffsetRequest) -> Result<()>;
-    fn get_write_offset(&self, request: GetWriteOffsetRequest) -> Result<GetWriteOffsetResponse>;
-    fn ack_read_offset(&self, request: AckReadOffsetRequest) -> Result<()>;
-    fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse>;
-    fn register_broker(&self, request: RegisterBrokerRequest) -> Result<()>;
+    fn create_topic(&self, name: &str, partition_count: u32) -> Result<()>;
+    fn get_topic(&self, name: &str) -> Result<GetTopicResponse>;
+    fn increment_write_offset(&self, topic: &str, partition: u32, inc: u32) -> Result<()>;
+    fn get_write_offset(&self, topic: &str, partition: u32) -> Result<GetWriteOffsetResponse>;
+    fn ack_read_offset(&self, topic: &str, partition: u32, consumer_group: &str, offset: u64) -> Result<()>;
+    fn get_read_offset(&self, topic: &str, partition: u32, consumer_group: &str) -> Result<GetReadOffsetResponse>;
+    fn register_broker(&self, host: &str, port: u16) -> Result<()>;
     fn list_brokers(&self) -> Result<ListBrokersResponse>;
 }
 
@@ -39,46 +40,49 @@ impl ClientImpl {
 }
 
 impl Client for ClientImpl {
-    fn create_topic(&self, request: CreateTopicRequest) -> Result<()> {
-        self.api_client.post(CREATE_TOPIC, request)?;
+    fn create_topic(&self, name: &str, partition_count: u32) -> Result<()> {
+        self.api_client.post(CREATE_TOPIC, CreateTopicRequest { name: Cow::Borrowed(name), partition_count })?;
         Ok(())
     }
 
-    fn get_topic(&self, request: GetTopicRequest) -> Result<GetTopicResponse> {
+    fn get_topic(&self, name: &str) -> Result<GetTopicResponse> {
         // this information is static in all our simulations, so highly cachable
         let mut topics = self.topics.lock().unwrap();
-        if let Some(response)  = topics.get(&request.name) {
+        if let Some(response)  = topics.get(name) {
             return Ok(response.clone())
         }
 
-        let topic_name = request.name;
-        let response: GetTopicResponse = self.api_client.get(&format!("{TOPICS}/{}", topic_name.clone()))?;
-        topics.insert(topic_name, response.clone());
+        let response: GetTopicResponse = self.api_client.get(&format!("{TOPICS}/{}", name))?;
+        topics.insert(name.to_owned(), response.clone());
 
         Ok(response)
     }
 
-    fn increment_write_offset(&self, request: IncrementWriteOffsetRequest) -> Result<()> {
-        self.api_client.post(INCREMENT_WRITE_OFFSET, request)?;
+    fn increment_write_offset(&self, topic: &str, partition: u32, inc: u32) -> Result<()> {
+        self.api_client.post(INCREMENT_WRITE_OFFSET, IncrementWriteOffsetRequest { topic: Cow::Borrowed(topic), partition, inc })?;
         Ok(())
     }
 
-    fn get_write_offset(&self, request: GetWriteOffsetRequest) -> Result<GetWriteOffsetResponse> {
-        self.api_client.get(&format!("{TOPICS}/{}/{PARTITIONS}/{}/{WRITE_OFFSET}", request.topic, request.partition))
+    fn get_write_offset(&self, topic: &str, partition: u32) -> Result<GetWriteOffsetResponse> {
+        self.api_client.get(&format!("{TOPICS}/{}/{PARTITIONS}/{}/{WRITE_OFFSET}", topic, partition))
     }
 
-    fn ack_read_offset(&self, request: AckReadOffsetRequest) -> Result<()> {
-        self.api_client.post(ACK_READ_OFFSET, request)?;
+    fn ack_read_offset(&self, topic: &str, partition: u32, consumer_group: &str, offset: u64) -> Result<()> {
+        self.api_client.post(ACK_READ_OFFSET, AckReadOffsetRequest { 
+            topic: Cow::Borrowed(topic), 
+            partition,
+            consumer_group: Cow::Borrowed(consumer_group),
+            offset,
+        })?;
         Ok(())
     }
 
-    fn get_read_offset(&self, request: GetReadOffsetRequest) -> Result<GetReadOffsetResponse> {
-        self.api_client.get(&format!("{TOPICS}/{}/{PARTITIONS}/{}/{CONSUMER_GROUPS}/{}/{READ_OFFSET}",
-            request.topic, request.partition, request.consumer_group))
+    fn get_read_offset(&self, topic: &str, partition: u32, consumer_group: &str) -> Result<GetReadOffsetResponse> {
+        self.api_client.get(&format!("{TOPICS}/{}/{PARTITIONS}/{}/{CONSUMER_GROUPS}/{}/{READ_OFFSET}", topic, partition, consumer_group))
     }
 
-    fn register_broker(&self, request: RegisterBrokerRequest) -> Result<()> {
-        self.api_client.post(REGISTER_BROKER, request)?;
+    fn register_broker(&self, host: &str, port: u16) -> Result<()> {
+        self.api_client.post(REGISTER_BROKER, RegisterBrokerRequest { host: Cow::Borrowed(host), port })?;
         Ok(())
     }
 

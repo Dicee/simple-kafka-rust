@@ -79,7 +79,7 @@ fn test_publish_write_offset_not_committed_if_failure_coordinator_failure() {
 
     let mut coordinator_client = coordinator::MockClient::new();
     coordinator_client.expect_get_write_offset()
-        .returning(|_| Err(coordinator::Error::Api(ApiError { kind: Internal, message : String::from("Oopsy") })));
+        .returning(|_, _| Err(coordinator::Error::Api(ApiError { kind: Internal, message : String::from("Oopsy") })));
 
     coordinator_client.expect_increment_write_offset().never();
 
@@ -239,11 +239,7 @@ fn test_read_batch_initialize_while_first_batch_is_being_written() {
         .has_ok(None);
 
     log_manager.atomic_write(TOPIC, PARTITION, WriteAndCommit(0, bytes[13..].to_vec())).unwrap();
-    coordinator_client.increment_write_offset(IncrementWriteOffsetRequest {
-        topic: TOPIC.to_owned(),
-        partition: PARTITION,
-        inc: 1,
-    }).unwrap();
+    coordinator_client.increment_write_offset(TOPIC, PARTITION, 1).unwrap();
 
     assert_that!(read_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), 0))
         .has_ok(Some(RecordBatchWithOffset { base_offset: 0, batch }));
@@ -287,11 +283,7 @@ fn test_read_batch_while_a_batch_is_being_written() {
         .has_ok(None);
 
     log_manager.atomic_write(TOPIC, PARTITION, WriteAndCommit(0, bytes[13..].to_vec())).unwrap();
-    coordinator_client.increment_write_offset(IncrementWriteOffsetRequest {
-        topic: TOPIC.to_owned(),
-        partition: PARTITION,
-        inc: batch_2.records.len() as u32,
-    }).unwrap();
+    coordinator_client.increment_write_offset(TOPIC, PARTITION, batch_2.records.len() as u32).unwrap();
 
     assert_that!(read_batch(&broker, TOPIC, PARTITION, CONSUMER_GROUP.to_owned(), 2))
         .has_ok(Some(RecordBatchWithOffset { base_offset: 2, batch: batch_2 }));
@@ -565,12 +557,7 @@ fn test_poll_batches_returns_fewer_batches_if_timeout_exceeded() {
 }
 
 fn ack_read_offset(coordinator_client:&Arc<dyn coordinator::Client>, offset: u64) {
-    coordinator_client.ack_read_offset(AckReadOffsetRequest {
-        topic: TOPIC.to_owned(),
-        partition: PARTITION,
-        consumer_group: CONSUMER_GROUP.to_owned(),
-        offset,
-    }).unwrap();
+    coordinator_client.ack_read_offset(TOPIC, PARTITION, CONSUMER_GROUP, offset).unwrap();
 }
 
 fn read_batch(broker: &Broker, topic: &str, partition: u32, consumer_group: String, offset: u64) -> Result<Option<RecordBatchWithOffset>, Error> {
@@ -585,8 +572,7 @@ fn read_batch(broker: &Broker, topic: &str, partition: u32, consumer_group: Stri
 }
 
 fn assert_write_offset_is(dummy_coordinator: &dyn coordinator::Client, offset: Option<u64>) {
-    assert_that!(dummy_coordinator.get_write_offset(GetWriteOffsetRequest { topic: TOPIC.to_owned(), partition: PARTITION }))
-        .has_ok(GetWriteOffsetResponse { offset });
+    assert_that!(dummy_coordinator.get_write_offset(TOPIC, PARTITION)).has_ok(GetWriteOffsetResponse { offset });
 }
 
 fn to_poll_batches_raw_response(ack_read_offset: Option<u64>, raw_batches: Vec<RawBatch>) -> PollBatchesRawResponse {

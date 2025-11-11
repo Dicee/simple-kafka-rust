@@ -1,7 +1,6 @@
 use crate::common::broker_resolver::BrokerResolver;
 use crate::common::{map_broker_error, map_coordinator_error};
 use broker::model::PollConfig;
-use coordinator::model::GetTopicRequest;
 use protocol::record::{read_next_batch, Record};
 use std::io::{Cursor, Read};
 use std::sync::Arc;
@@ -65,7 +64,7 @@ impl Client {
         let mut consumer_states = Vec::new();
 
         for topic in topics {
-            let response = self.coordinator.get_topic(GetTopicRequest { name: topic.clone() }).map_err(map_coordinator_error)?;
+            let response = self.coordinator.get_topic(&topic).map_err(map_coordinator_error)?;
             consumer_states.push(TopicConsumerState {
                 topic: response.name,
                 partition_count: response.partition_count,

@@ -1,10 +1,9 @@
 use crate::consumer::{ConsumerRecord, ConsumerRecordIter};
-use crate::mock_utils::{expect_list_brokers, set_up_broker_resolver};
+use crate::mock_utils::{expect_get_topic, expect_list_brokers, set_up_broker_resolver};
 use crate::{common, consumer};
 use assertor::{assert_that, EqualityAssertion, OptionAssertion};
 use broker::model::{BrokerApiErrorKind, PollBatchesRawResponse, PollConfig};
 use client_utils::ApiError;
-use coordinator::model::{GetTopicRequest, GetTopicResponse};
 use predicates::ord::eq;
 use protocol::record::{serialize_batch_into, Record, RecordBatch};
 use std::borrow::ToOwned;
@@ -160,15 +159,9 @@ fn test_subscribe_multiple_topics_one_with_no_batch_at_first() {
 
 fn set_up_coordinator() -> Arc<dyn coordinator::Client> {
     let mut coordinator = coordinator::MockClient::new();
-
-    coordinator.expect_get_topic()
-        .with(eq(GetTopicRequest { name: TOPIC1.to_owned() }))
-        .returning(|_| Ok(GetTopicResponse { name: TOPIC1.to_owned(), partition_count: 1 }));
-
-    coordinator.expect_get_topic()
-        .with(eq(GetTopicRequest { name: TOPIC2.to_owned() }))
-        .returning(|_| Ok(GetTopicResponse { name: TOPIC2.to_owned(), partition_count: 2 }));
-
+    
+    expect_get_topic(&mut coordinator, TOPIC1, 1);
+    expect_get_topic(&mut coordinator, TOPIC2, 2);
     expect_list_brokers(&mut coordinator);
 
     Arc::new(coordinator)

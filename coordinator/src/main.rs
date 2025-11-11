@@ -34,7 +34,7 @@ async fn ping() -> impl Responder { "{\"ping\": \"pong\"}" }
 #[post("/create-topic")]
 async fn create_topic(
     dao: web::Data<Arc<MetadataAndStateDao>>,
-    request: web::Json<CreateTopicRequest>,
+    request: web::Json<CreateTopicRequest<'_>>,
 ) -> impl Responder {
     match dao.create_topic(&request.name, request.partition_count) {
         Ok(_) => HttpResponse::NoContent().body(""),
@@ -56,7 +56,7 @@ async fn get_topic(
 #[post("/increment-write-offset")]
 async fn inc_write_offset(
     dao: web::Data<Arc<MetadataAndStateDao>>,
-    request: web::Json<IncrementWriteOffsetRequest>,
+    request: web::Json<IncrementWriteOffsetRequest<'_>>,
 ) -> impl Responder {
     match dao.inc_write_offset_by(&request.topic, request.partition, request.inc) {
         Ok(_) => HttpResponse::NoContent().body(""),
@@ -78,7 +78,7 @@ async fn get_write_offset(
 #[post("/ack-read-offset")]
 async fn ack_read_offset(
     dao: web::Data<Arc<MetadataAndStateDao>>,
-    request: web::Json<AckReadOffsetRequest>,
+    request: web::Json<AckReadOffsetRequest<'_>>,
 ) -> impl Responder {
     let AckReadOffsetRequest { topic, partition, consumer_group, offset } = request.into_inner();
     match dao.ack_read_offset(&topic, partition, &consumer_group, offset) {
@@ -101,10 +101,10 @@ async fn get_read_offset(
 #[post("/register-broker")]
 async fn register_broker(
     broker_registry: web::Data<Arc<BrokerRegistry>>,
-    request: web::Json<RegisterBrokerRequest>,
+    request: web::Json<RegisterBrokerRequest<'_>>,
 ) -> impl Responder {
     let RegisterBrokerRequest { host, port } = request.into_inner();
-    broker_registry.register_broker(HostAndPort { host, port });
+    broker_registry.register_broker(HostAndPort { host: host.to_string(), port });
     HttpResponse::NoContent().body("")
 }
 

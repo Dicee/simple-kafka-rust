@@ -45,6 +45,10 @@ pub struct TopicPartition {
     pub partition: u32,
 }
 
+impl TopicPartition {
+    pub fn new(topic: String, partition: u32) -> Self { Self { topic, partition } }
+}
+
 #[derive(Serialize, Deserialize)]
 #[derive(Eq, PartialEq, Debug)]
 pub struct PublishResponse {

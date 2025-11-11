@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
 
 // POST operations
@@ -27,15 +28,15 @@ pub enum CoordinatorApiErrorKind {
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]
-pub struct CreateTopicRequest {
-    pub name: String,
+pub struct CreateTopicRequest<'a> {
+    pub name: Cow<'a, str>,
     pub partition_count: u32,
 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]
-pub struct GetTopicRequest {
-    pub name: String,
+pub struct GetTopicRequest<'a> {
+    pub name: Cow<'a, str>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -47,16 +48,16 @@ pub struct GetTopicResponse {
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]
-pub struct IncrementWriteOffsetRequest {
-    pub topic: String,
+pub struct IncrementWriteOffsetRequest<'a> {
+    pub topic: Cow<'a, str>,
     pub partition: u32,
     pub inc: u32,
 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]
-pub struct GetWriteOffsetRequest {
-    pub topic: String,
+pub struct GetWriteOffsetRequest<'a> {
+    pub topic: Cow<'a, str>,
     pub partition: u32,
 }
 
@@ -68,19 +69,19 @@ pub struct GetWriteOffsetResponse {
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]
-pub struct AckReadOffsetRequest {
-    pub topic: String,
+pub struct AckReadOffsetRequest<'a> {
+    pub topic: Cow<'a, str>,
     pub partition: u32,
-    pub consumer_group: String,
+    pub consumer_group: Cow<'a, str>,
     pub offset: u64,
 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]
-pub struct GetReadOffsetRequest {
-    pub topic: String,
+pub struct GetReadOffsetRequest<'a> {
+    pub topic: Cow<'a, str>,
     pub partition: u32,
-    pub consumer_group: String,
+    pub consumer_group: Cow<'a, str>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -108,8 +109,8 @@ pub struct ListBrokersResponse {
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq)]
-pub struct RegisterBrokerRequest {
-    pub host: String,
+pub struct RegisterBrokerRequest<'a> {
+    pub host: Cow<'a, str>,
     pub port: u16,
 }
 
@@ -129,7 +130,7 @@ impl HostAndPort {
 #[derive(Deserialize)]
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub struct TopicPartition {
-    pub topic: String,
+    pub topic: String, // used in hash maps so it's easier to have this as owned data
     pub partition: u32,
 }
 

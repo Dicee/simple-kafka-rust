@@ -1,11 +1,11 @@
 use super::*;
 use crate::mock_utils::expect_get_topic;
 use assertor::{assert_that, EqualityAssertion, ResultAssertion};
-use coordinator::model::{CoordinatorApiErrorKind, GetTopicRequest};
+use client_utils::ApiError;
+use coordinator::model::CoordinatorApiErrorKind;
 use mockall::predicate;
 use protocol::record::Record;
 use std::sync::Arc;
-use client_utils::ApiError;
 
 const TOPIC1: &str = "topic1";
 const TOPIC2: &str = "topic2";
@@ -84,7 +84,7 @@ fn test_select_partition_topic_has_no_partition() {
 fn test_select_partition_coordinator_failure() {
     let mut coordinator = coordinator::MockClient::new();
     coordinator.expect_get_topic()
-        .with(predicate::eq(GetTopicRequest { name: TOPIC1.to_owned() }))
+        .with(predicate::eq(TOPIC1))
         .returning(|_| { Err(coordinator::Error::Api(ApiError { kind: CoordinatorApiErrorKind::Internal, message: ERROR_MSG.to_owned() })) });
 
     let mut partition_selector = PartitionSelector::new(Arc::new(coordinator));

@@ -1,9 +1,10 @@
 use crate::broker::Error::{CoordinatorApi, Io, UnexpectedCoordinatorError};
+use crate::broker::InvalidReadOffsetCause::NoDataWrittenYet;
 use crate::persistence::indexing::{self, IndexLookupResult};
-use crate::persistence::{AtomicReadAction, AtomicWriteAction, RawBatch, LogManager, RotatingAppendOnlyLog, RotatingLogReader};
+use crate::persistence::{AtomicReadAction, AtomicWriteAction, LogManager, RawBatch, RotatingAppendOnlyLog, RotatingLogReader};
 use broker::model::{PollBatchesRawResponse, PollConfig};
 use client_utils::ApiError;
-use coordinator::model::{CoordinatorApiErrorKind, GetReadOffsetRequest, GetWriteOffsetRequest, IncrementWriteOffsetRequest};
+use coordinator::model::CoordinatorApiErrorKind;
 use protocol::record::{deserialize_batch_metadata, read_batch_metadata, serialize_batch, RecordBatch, BATCH_METADATA_SIZE};
 use std::fmt::{Display, Formatter};
 use std::ops::Sub;
@@ -13,7 +14,6 @@ use std::time::Instant;
 use std::{io, thread};
 use Error::InvalidReadOffset;
 use InvalidReadOffsetCause::{LessOrEqualToAckReadOffset, MoreThanWriteOffset};
-use crate::broker::InvalidReadOffsetCause::NoDataWrittenYet;
 
 #[cfg(test)]
 #[path = "./broker_test.rs"]
@@ -86,8 +86,7 @@ impl Broker {
     pub fn poll_batches_raw(&self, topic: &str, partition: u32, consumer_group: String, offset: u64, poll_config: &PollConfig) -> Result<PollBatchesRawResponse, Error> {
         let start = Instant::now();
         let write_notifier = self.log_manager.get_write_notifier(topic, partition)?;
-        let ack_read_offset = self.coordinator_client.get_read_offset(GetReadOffsetRequest {
-            topic: topic.to_owned(), partition, consumer_group: consumer_group.clone() })?.offset;
+        let ack_read_offset = self.coordinator_client.get_read_offset(&topic, partition, &consumer_group)?.offset;
 
         if let Some(read_offset) = ack_read_offset && read_offset >= offset {
             return Err(InvalidReadOffset(LessOrEqualToAckReadOffset { ack_read_offset: read_offset, invalid_offset: offset }));
@@ -126,7 +125,7 @@ impl Broker {
     }
 
     fn read_batch_raw(&self, topic: &str, partition: u32, consumer_group: String, offset: u64) -> Result<Option<RawBatch>, Error> {
-        let write_offset = self.coordinator_client.get_write_offset(GetWriteOffsetRequest { topic: topic.to_owned(), partition })?.offset;
+        let write_offset = self.coordinator_client.get_write_offset(&topic, partition)?.offset;
 
         match write_offset {
             None if offset > 0 => return Err(InvalidReadOffset(NoDataWrittenYet { invalid_offset: offset })),
@@ -164,7 +163,7 @@ struct WriteAndCommit {
 
 impl AtomicWriteAction for WriteAndCommit {
     fn write_to(&self, log: &mut RotatingAppendOnlyLog) -> Result<u64, Error> {
-        let next_offset = self.coordinator_client.get_write_offset(GetWriteOffsetRequest { topic: self.topic.clone(), partition: self.partition })?
+        let next_offset = self.coordinator_client.get_write_offset(&self.topic, self.partition)?
             .offset.map(|o| o + 1).unwrap_or(0);
 
         // Note that adding the offset has to be done by the broker as there may be multiple publishers, and only the broker can do this
@@ -173,11 +172,7 @@ impl AtomicWriteAction for WriteAndCommit {
         log.write_all(&self.bytes)?;
         log.flush()?;
 
-        self.coordinator_client.increment_write_offset(IncrementWriteOffsetRequest {
-            topic: self.topic.clone(),
-            partition: self.partition,
-            inc: self.record_count,
-        })?;
+        self.coordinator_client.increment_write_offset(&self.topic, self.partition, self.record_count)?;
 
         Ok(next_offset)
     }
