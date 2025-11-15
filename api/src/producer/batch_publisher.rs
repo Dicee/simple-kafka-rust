@@ -1,4 +1,4 @@
-use crate::common::{self, broker_resolver::BrokerResolver, map_broker_error};
+use crate::common::{self, broker_resolver::BrokerResolver};
 use broker::model::TopicPartition;
 use protocol::record::{serialize_batch, RecordBatch};
 use std::sync::mpsc::{Receiver, Sender};
@@ -105,7 +105,7 @@ impl BatchPublisherTask {
         let bytes = serialize_batch(batch);
 
         let broker = self.broker_resolver.client_for(partition);
-        broker.publish_raw(topic, partition, bytes, record_count).map_err(map_broker_error)?;
+        broker.publish_raw(topic, partition, bytes, record_count)?;
 
         Ok(())
     }

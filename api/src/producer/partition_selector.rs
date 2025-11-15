@@ -1,8 +1,8 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::Arc;
+use crate::common::Result;
 use linked_hash_map::LinkedHashMap;
 use protocol::record::Record;
-use crate::common::{map_coordinator_error, Result};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::Arc;
 
 #[cfg(test)]
 #[path = "./partition_selector_test.rs"]
@@ -29,9 +29,7 @@ impl PartitionSelector {
     /// [Error::CoordinatorApi] or [Error::Ureq] if we failed to make a call to the coordinator service
     pub fn select_partition(&mut self, topic: &str, record: &Record) -> Result<u32> {
         // this is cached on the client side so we can happily call it many times
-        let partition_count = self.coordinator.get_topic(topic)
-            .map_err(map_coordinator_error)?.partition_count;
-
+        let partition_count = self.coordinator.get_topic(topic)?.partition_count;
         if partition_count == 0 { panic!("Topic {} has no partitions, which should be impossible", topic) };
 
         Ok(self.hash_selector.try_select_partition(partition_count, record)

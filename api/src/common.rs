@@ -21,24 +21,28 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub fn map_coordinator_error(e: coordinator::Error) -> Error {
-    match e {
-        coordinator::Error::Ureq(e) => Error::Ureq(e),
-        coordinator::Error::Api(e) => Error::CoordinatorApi(e),
-        coordinator::Error::InvalidResponse(message) => Error::CoordinatorApi(ApiError {
-            kind: CoordinatorApiErrorKind::Internal,
-            message,
-        })
+impl From<coordinator::Error> for Error {
+    fn from(e: coordinator::Error) -> Self {
+        match e {
+            coordinator::Error::Ureq(e) => Error::Ureq(e),
+            coordinator::Error::Api(e) => Error::CoordinatorApi(e),
+            coordinator::Error::InvalidResponse(message) => Error::CoordinatorApi(ApiError {
+                kind: CoordinatorApiErrorKind::Internal,
+                message,
+            })
+        }
     }
 }
 
-pub fn map_broker_error(e: broker::Error) -> Error {
-    match e {
-        broker::Error::Ureq(e) => Error::Ureq(e),
-        broker::Error::Api(e) => Error::BrokerApi(e),
-        broker::Error::InvalidResponse(message) => Error::BrokerApi(ApiError {
-            kind: BrokerApiErrorKind::Internal,
-            message,
-        })
+impl From<broker::Error> for Error {
+    fn from(e: broker::Error) -> Self {
+        match e {
+            broker::Error::Ureq(e) => Error::Ureq(e),
+            broker::Error::Api(e) => Error::BrokerApi(e),
+            broker::Error::InvalidResponse(message) => Error::BrokerApi(ApiError {
+                kind: BrokerApiErrorKind::Internal,
+                message,
+            })
+        }
     }
 }

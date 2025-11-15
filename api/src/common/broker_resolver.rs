@@ -1,7 +1,7 @@
-use crate::common::{map_coordinator_error, Result};
+use crate::common::Result;
 use coordinator::model::HostAndPort;
-use std::sync::Arc;
 use mockall::automock;
+use std::sync::Arc;
 
 #[cfg(test)]
 #[path = "broker_resolver_test.rs"]
@@ -28,7 +28,7 @@ impl BrokerResolver {
     pub(crate) fn new_with_factory(coordinator_client: Arc<dyn coordinator::Client>, client_factory: &impl BrokerClientFactory) -> Result<Self> {
         // by contract, list_brokers returns the hosts in a stable order (registration order), and our simplifying hypotheses is that the broker
         // configuration is constant, so we can safely store them in a read-only list and use the same list forever
-        let ordered_broker_clients: Vec<_> = coordinator_client.list_brokers().map_err(map_coordinator_error)?
+        let ordered_broker_clients: Vec<_> = coordinator_client.list_brokers()?
             .brokers.iter()
             .map(|host| client_factory.create(host))
             .collect();
